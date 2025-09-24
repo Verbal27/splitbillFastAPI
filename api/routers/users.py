@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.context import CryptContext
 
 from ..db.database import get_session
-from ..models.models import UsersOrm
+from ..models.models import SplitBillMembersOrm, UsersOrm, PendingUsersOrm
 from ..schemas.users_schema import UserCreateSchema, UserReadSchema, UserUpdateSchema
 
 
@@ -35,7 +35,22 @@ async def create_user(
         print(e)
         raise HTTPException(status_code=400, detail="Username or email already exists")
 
-    return db_user
+    pending_members_result = await session.execute(
+        select(SplitBillMembersOrm).where(SplitBillMembersOrm.email == db_user.email)
+    )
+    pending_members = pending_members_result.scalars().all()
+
+    for member in pending_members:
+        member.user_id = db_user.id
+        member.pending_user_id = None
+        session.add(member)
+
+    pending_user_record = await session.get(PendingUsersOrm, db_user.id)
+    if pending_user_record:
+        await session.delete(pending_user_record)
+
+    await session.commit()
+    return UserReadSchema.model_validate(db_user)
 
 
 @router.get("/me", response_model=UserReadSchema)

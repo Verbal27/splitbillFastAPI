@@ -1,15 +1,23 @@
 from decimal import Decimal
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from api.core.utils import calculate_balances, get_splitbill_view
+from api.core.utils import (
+    _apply_money_given_to_balances,
+    calculate_balances,
+    get_splitbill_view,
+)
 
 
 from ..db.database import get_session
 from ..models.models import (
+    CommentsOrm,
     ExpenseAssignmentOrm,
     ExpenseTypeEnum,
+    MoneyGivenOrm,
     SplitBillsOrm,
     SplitBillMembersOrm,
     ExpensesOrm,
@@ -17,7 +25,12 @@ from ..models.models import (
     UsersOrm,
 )
 from ..schemas.splitbill_schema import (
+    CommentCreateSchema,
+    CommentReadSchema,
     ExpenseCreateSchema,
+    ExpenseReadSchema,
+    MoneyGivenCreateSchema,
+    MoneyGivenReadSchema,
     SplitBillCreateSchema,
     SplitBillReadSchema,
 )
@@ -113,23 +126,20 @@ async def create_splitbill(
     return db_splitbill
 
 
-@router.get("/{splitbill_id}/expenses")
+@router.get("/{splitbill_id}/expenses", response_model=List[ExpenseReadSchema])
 async def read_expenses(
     splitbill_id: int, session: AsyncSession = Depends(get_session)
 ):
-    result = await session.execute(
-        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+    # Eager-load assignments
+    stmt = (
+        select(ExpensesOrm)
+        .where(ExpensesOrm.splitbill_id == splitbill_id)
+        .options(selectinload(ExpensesOrm.assignments))
     )
-    splitbill_instance = result.scalar_one_or_none()
-    if not splitbill_instance:
-        raise HTTPException(status_code=404, detail="SplitBill not found")
+    result = await session.execute(stmt)
+    expenses_list = result.scalars().all()
 
-    expenses_result = await session.execute(
-        select(ExpensesOrm).where(ExpensesOrm.splitbill_id == splitbill_id)
-    )
-    expenses_list = expenses_result.scalars().all()
-
-    return expenses_list
+    return [ExpenseReadSchema.model_validate(e) for e in expenses_list]
 
 
 @router.post("/{splitbill_id}/expenses")
@@ -243,3 +253,76 @@ async def calculate_splitbill_balances(
     if balances is None:
         raise HTTPException(status_code=404, detail="Splitbill not found")
     return balances
+
+
+@router.post("/{splitbill_id}/money-given", response_model=MoneyGivenReadSchema)
+async def create_money_given(
+    splitbill_id: int,
+    transaction_data: MoneyGivenCreateSchema,
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+    )
+    splitbill = result.scalar_one_or_none()
+    if not splitbill:
+        raise HTTPException(status_code=404, detail="SplitBill not found")
+
+    db_transaction = MoneyGivenOrm(
+        title=transaction_data.title,
+        amount=Decimal(transaction_data.amount).quantize(Decimal("0.01")),
+        given_by=transaction_data.given_by,
+        given_to=transaction_data.given_to,
+        splitbill_id=splitbill_id,
+    )
+    session.add(db_transaction)
+    await session.flush()
+
+    await _apply_money_given_to_balances(
+        session=session,
+        splitbill_id=splitbill_id,
+        giver_member_id=db_transaction.given_by,
+        recipient_member_id=db_transaction.given_to,
+        amount=db_transaction.amount,
+    )
+
+    await session.commit()
+    await session.refresh(db_transaction)
+    return MoneyGivenReadSchema.model_validate(db_transaction)
+
+
+@router.post("/{splitbill_id}/comments", response_model=CommentReadSchema)
+async def create_comment(
+    splitbill_id: int,
+    comment: CommentCreateSchema,
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+    )
+    splitbill = result.scalar_one_or_none()
+
+    if not splitbill:
+        raise HTTPException(status_code=404, detail="Splitbill not found")
+
+    author_result = await session.execute(
+        select(SplitBillMembersOrm).where(
+            SplitBillMembersOrm.splitbill_id == splitbill_id,
+            SplitBillMembersOrm.user_id == comment.author_id,
+        )
+    )
+    author = author_result.scalar_one_or_none()
+    if not author:
+        raise HTTPException(
+            status_code=400,
+            detail="Author must be a member of this splitbill",
+        )
+    db_comment = CommentsOrm(
+        text=comment.text, author_id=comment.author_id, splitbill_id=splitbill_id
+    )
+
+    session.add(db_comment)
+    await session.commit()
+    await session.refresh(db_comment)
+
+    return CommentReadSchema.model_validate(db_comment)

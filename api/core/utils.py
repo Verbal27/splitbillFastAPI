@@ -10,6 +10,7 @@ from api.models.models import (
     SplitBillMembersOrm,
     SplitBillsOrm,
     ExpenseAssignmentOrm,
+    StatusEnum,
 )
 
 
@@ -134,3 +135,64 @@ async def calculate_balances(splitbill_id: int, session: AsyncSession):
 
     await session.commit()
     return balances_to_create
+
+
+async def _apply_money_given_to_balances(
+    session: AsyncSession,
+    splitbill_id: int,
+    giver_member_id: int,
+    recipient_member_id: int,
+    amount: Decimal,
+):
+    amount = Decimal(amount).quantize(Decimal("0.01"))
+
+    res = await session.execute(
+        select(BalancesOrm).where(
+            BalancesOrm.from_member_id == recipient_member_id,
+            BalancesOrm.to_member_id == giver_member_id,
+            BalancesOrm.splitbill_id == splitbill_id,
+        )
+    )
+    direct = res.scalar_one_or_none()
+    if direct:
+        direct.amount = (direct.amount + amount).quantize(Decimal("0.01"))
+        direct.status = StatusEnum.active
+        return
+
+    res = await session.execute(
+        select(BalancesOrm).where(
+            BalancesOrm.from_member_id == giver_member_id,
+            BalancesOrm.to_member_id == recipient_member_id,
+            BalancesOrm.splitbill_id == splitbill_id,
+        )
+    )
+    opposite = res.scalar_one_or_none()
+    if opposite:
+        if opposite.amount > amount:
+            opposite.amount = (opposite.amount - amount).quantize(Decimal("0.01"))
+            return
+        elif opposite.amount == amount:
+            await session.delete(opposite)
+            return
+        else:
+            net = (amount - opposite.amount).quantize(Decimal("0.01"))
+            await session.delete(opposite)
+            new_bal = BalancesOrm(
+                from_member_id=recipient_member_id,
+                to_member_id=giver_member_id,
+                splitbill_id=splitbill_id,
+                amount=net,
+            )
+            new_bal.status = StatusEnum.active
+            session.add(new_bal)
+            return
+
+    new_bal = BalancesOrm(
+        from_member_id=recipient_member_id,
+        to_member_id=giver_member_id,
+        splitbill_id=splitbill_id,
+        amount=amount,
+    )
+    new_bal.status = StatusEnum.active
+    session.add(new_bal)
+    return
