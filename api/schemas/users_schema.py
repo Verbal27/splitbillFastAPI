@@ -9,6 +9,20 @@ Username = Annotated[str, StringConstraints(min_length=3, max_length=20)]
 Password = Annotated[str, StringConstraints(min_length=8)]
 
 
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+class TokenData(BaseModel):
+    sub: int | None = None
+
+
+class UserLoginSchema(BaseModel):
+    email: EmailStr
+    password: Password
+
+
 class UserBaseSchema(BaseModel):
     username: str
     email: EmailStr
