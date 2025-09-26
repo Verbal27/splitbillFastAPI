@@ -1,7 +1,12 @@
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+    AsyncAttrs,
+)
 from sqlalchemy.orm import DeclarativeBase, mapped_column
 from typing import Annotated, AsyncGenerator
-from api.db.config import settings
+from api.core.config import settings
 from datetime import datetime
 from sqlalchemy import func
 
@@ -23,7 +28,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 # Base class for models
-class Base(DeclarativeBase):
+class Base(AsyncAttrs, DeclarativeBase):
     pass
 
 

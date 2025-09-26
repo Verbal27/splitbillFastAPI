@@ -100,7 +100,7 @@ class PendingUsersOrm(Base):
     __tablename__ = "pendingusers"
 
     id: Mapped[intpk]
-    email: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+    email: Mapped[str | None] = mapped_column(String(100), nullable=True)
     alias: Mapped[str | None] = mapped_column(String(50), nullable=True)
     invited_at: Mapped[created_at] = mapped_column(server_default=func.now())
 
