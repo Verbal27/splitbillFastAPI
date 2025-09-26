@@ -47,7 +47,14 @@ async def list_all(
 ):
     stmt = (
         select(SplitBillsOrm)
-        .where(SplitBillsOrm.owner_id == current_user.id)
+        .where(
+            (SplitBillsOrm.owner_id == current_user.id)
+            | (
+                SplitBillsOrm.members.any(
+                    SplitBillMembersOrm.user_id == current_user.id
+                )
+            )
+        )
         .options(
             selectinload(SplitBillsOrm.members).selectinload(SplitBillMembersOrm.user),
             selectinload(SplitBillsOrm.members).selectinload(
@@ -60,6 +67,7 @@ async def list_all(
             selectinload(SplitBillsOrm.owner),
         )
     )
+
     result = await session.execute(stmt)
     splitbills_list = result.scalars().all()
 
@@ -216,7 +224,11 @@ async def create_expense(
                 detail="Assignments required for percentage expense",
             )
 
-        total_percentage = sum(a.share_amount for a in expense_data.assignments)
+        total_percentage = sum(
+            Decimal(a.share_amount)
+            for a in expense_data.assignments
+            if a.share_amount is not None
+        )
         if total_percentage != 100:
             raise HTTPException(
                 status_code=400,
@@ -243,7 +255,9 @@ async def create_expense(
             )
 
         total_amount = sum(
-            a.share_amount for a in expense_data.assignments if a.share_amount
+            Decimal(a.share_amount)
+            for a in expense_data.assignments
+            if a.share_amount is not None
         )
         if total_amount != db_expense.amount:
             raise HTTPException(
