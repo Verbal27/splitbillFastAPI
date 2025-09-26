@@ -1,3 +1,4 @@
+import secrets
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,7 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.auth import get_current_user, hash_password
 
 from ..db.database import get_session
-from ..models.models import SplitBillMembersOrm, UsersOrm, PendingUsersOrm
+from ..models.models import (
+    SplitBillMembersOrm,
+    UserStatusEnum,
+    UsersOrm,
+    PendingUsersOrm,
+)
 from ..schemas.users_schema import (
     UserCreateSchema,
     UserReadSchema,
@@ -24,6 +30,9 @@ async def create_user(
     db_user = UsersOrm(
         username=user.username, email=user.email, hashed_password=hashed_pw
     )
+    token = secrets.token_urlsafe(32)
+    db_user.activation_token = token
+    print(f"localhost:8000/docs/users/activate/{token}")
     session.add(db_user)
     try:
         await session.flush()
@@ -99,3 +108,19 @@ async def update_user(
         return {"message": "Password has been updated successfully"}
     else:
         return {"message": "User profile updated successfully"}
+
+
+@router.get("/activate")
+async def activate_user(token: str, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(
+        select(UsersOrm).where(UsersOrm.activation_token == token)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    user.status = UserStatusEnum.active
+    user.activation_token = None
+    session.add(user)
+    await session.commit()
+    return {"message": "User activated successfully"}
