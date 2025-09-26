@@ -43,6 +43,7 @@ class UsersOrm(Base):
         default=UserStatusEnum.pending,
     )
     date_joined: Mapped[created_at] = mapped_column(server_default=func.now())
+    activation_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     date_updated: Mapped[updated_at]
     # Relationships
     splitbills: Mapped[list["SplitBillsOrm"]] = relationship(
