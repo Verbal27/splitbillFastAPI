@@ -10,6 +10,7 @@ from api.core.utils import (
     calculate_balances,
     get_splitbill_view,
 )
+from api.core.auth import get_current_user
 
 
 from ..db.database import get_session
@@ -39,9 +40,43 @@ from ..schemas.splitbill_schema import (
 router = APIRouter(prefix="/splitbills", tags=["splitbills"])
 
 
+@router.get("/", response_model=list[SplitBillReadSchema])
+async def list_all(
+    session: AsyncSession = Depends(get_session),
+    current_user: UsersOrm = Depends(get_current_user),
+):
+    stmt = (
+        select(SplitBillsOrm)
+        .where(SplitBillsOrm.owner_id == current_user.id)
+        .options(
+            selectinload(SplitBillsOrm.members).selectinload(SplitBillMembersOrm.user),
+            selectinload(SplitBillsOrm.members).selectinload(
+                SplitBillMembersOrm.pending_user
+            ),
+            selectinload(SplitBillsOrm.expenses).selectinload(ExpensesOrm.assignments),
+            selectinload(SplitBillsOrm.money_given),
+            selectinload(SplitBillsOrm.comments),
+            selectinload(SplitBillsOrm.balances),
+            selectinload(SplitBillsOrm.owner),
+        )
+    )
+    result = await session.execute(stmt)
+    splitbills_list = result.scalars().all()
+
+    if not splitbills_list:
+        raise HTTPException(status_code=404, detail="No splitbills found")
+
+    return [
+        SplitBillReadSchema.model_validate(sb, from_attributes=True)
+        for sb in splitbills_list
+    ]
+
+
 @router.get("/{splitbill_id}", response_model=SplitBillReadSchema)
 async def read_splitbill(
-    splitbill_id: int, session: AsyncSession = Depends(get_session)
+    splitbill_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: UsersOrm = Depends(get_current_user),
 ):
     splitbill = await get_splitbill_view(session, splitbill_id)
     if not splitbill:
@@ -50,87 +85,74 @@ async def read_splitbill(
     return SplitBillReadSchema.model_validate(splitbill)
 
 
-@router.post("/")
+@router.post("/", response_model=SplitBillReadSchema)
 async def create_splitbill(
     splitbill_data: SplitBillCreateSchema,
     session: AsyncSession = Depends(get_session),
+    current_user: UsersOrm = Depends(get_current_user),
 ):
     db_splitbill = SplitBillsOrm(
         title=splitbill_data.title,
         currency=splitbill_data.currency,
-        owner_id=splitbill_data.owner_id,
+        owner_id=current_user.id,
         status=splitbill_data.status,
     )
     session.add(db_splitbill)
     await session.flush()
 
-    result = await session.execute(
-        select(UsersOrm).where(UsersOrm.id == db_splitbill.owner_id)
-    )
-    owner = result.scalar_one()
-
     owner_member = SplitBillMembersOrm(
-        alias=owner.username,
-        email=owner.email,
+        alias=current_user.username,
+        email=current_user.email,
         splitbill_id=db_splitbill.id,
-        user_id=db_splitbill.owner_id,
-        invited_by=db_splitbill.owner_id,
+        user_id=current_user.id,
+        invited_by=current_user.id,
     )
     session.add(owner_member)
 
     for member_data in splitbill_data.members:
+        user = None
         if member_data.email:
             result = await session.execute(
                 select(UsersOrm).where(UsersOrm.email == member_data.email)
             )
             user = result.scalar_one_or_none()
 
-            if user:
-                member = SplitBillMembersOrm(
-                    alias=member_data.alias,
-                    email=user.email,
-                    splitbill_id=db_splitbill.id,
-                    user_id=user.id,
-                    invited_by=splitbill_data.owner_id,
-                )
-            else:
-                pending_user = PendingUsersOrm(
-                    email=member_data.email, alias=member_data.alias
-                )
-                session.add(pending_user)
-                await session.flush()
-
-                member = SplitBillMembersOrm(
-                    alias=member_data.alias,
-                    email=member_data.email,
-                    splitbill_id=db_splitbill.id,
-                    pending_user_id=pending_user.id,
-                    invited_by=splitbill_data.owner_id,
-                )
+        if user:
+            member = SplitBillMembersOrm(
+                alias=member_data.alias,
+                email=user.email,
+                splitbill_id=db_splitbill.id,
+                user_id=user.id,
+                invited_by=current_user.id,
+            )
         else:
-            pending_user = PendingUsersOrm(alias=member_data.alias)
+            pending_user = PendingUsersOrm(
+                email=member_data.email,
+                alias=member_data.alias,
+            )
             session.add(pending_user)
             await session.flush()
 
             member = SplitBillMembersOrm(
                 alias=member_data.alias,
+                email=member_data.email,
                 splitbill_id=db_splitbill.id,
                 pending_user_id=pending_user.id,
-                invited_by=splitbill_data.owner_id,
+                invited_by=current_user.id,
             )
 
         session.add(member)
 
+    splitbill_view = await get_splitbill_view(session, db_splitbill.id)
+    res = SplitBillReadSchema.model_validate(splitbill_view)
     await session.commit()
-    await session.refresh(db_splitbill)
-    return db_splitbill
+    return res
 
 
 @router.get("/{splitbill_id}/expenses", response_model=List[ExpenseReadSchema])
 async def read_expenses(
     splitbill_id: int, session: AsyncSession = Depends(get_session)
 ):
-    # Eager-load assignments
     stmt = (
         select(ExpensesOrm)
         .where(ExpensesOrm.splitbill_id == splitbill_id)
