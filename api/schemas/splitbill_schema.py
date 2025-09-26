@@ -22,7 +22,7 @@ class TypeEnum(StrEnum):
 # ---------- EXPENSES ----------
 class ExpenseAssignmentCreateSchema(BaseModel):
     member_id: int
-    share_amount: Decimal
+    share_amount: Optional[Decimal]
 
     model_config = {"from_attributes": True}
 
