@@ -50,4 +50,4 @@ class UserReadSchema(UserBaseSchema):
 class UserUpdateSchema(BaseModel):
     username: Optional[Username] = None
     email: Optional[EmailStr] = None
-    hashed_password: Optional[Password] = None
+    password: Optional[Password] = None
