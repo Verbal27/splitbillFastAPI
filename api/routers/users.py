@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,7 +6,11 @@ from ..core.auth import get_current_user, hash_password
 
 from ..db.database import get_session
 from ..models.models import SplitBillMembersOrm, UsersOrm, PendingUsersOrm
-from ..schemas.users_schema import UserCreateSchema, UserReadSchema, UserUpdateSchema
+from ..schemas.users_schema import (
+    UserCreateSchema,
+    UserReadSchema,
+    UserUpdateSchema,
+)
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -22,7 +26,7 @@ async def create_user(
     )
     session.add(db_user)
     try:
-        await session.commit()
+        await session.flush()
         await session.refresh(db_user)
     except Exception as e:
         await session.rollback()
@@ -38,12 +42,16 @@ async def create_user(
         member.pending_user_id = None
         session.add(member)
 
-    pending_user_record = await session.get(PendingUsersOrm, db_user.id)
-    print(pending_user_record)
-    if pending_user_record:
-        await session.delete(pending_user_record)
+    pending_users_result = await session.execute(
+        select(PendingUsersOrm).where(PendingUsersOrm.email == db_user.email)
+    )
+    pending_users = pending_users_result.scalars().all()
 
-    await session.commit()
+    for pending_user in pending_users:
+        await session.delete(pending_user)
+
+    await session.flush()
+
     user_dict = {
         "id": db_user.id,
         "username": db_user.username,
@@ -52,8 +60,9 @@ async def create_user(
         "date_joined": db_user.date_joined,
         "date_updated": db_user.date_updated,
     }
-    print(user_dict)
-    return UserReadSchema.model_validate(user_dict)
+    res = UserReadSchema.model_validate(user_dict)
+    await session.commit()
+    return res
 
 
 @router.get("/me", response_model=UserReadSchema)
@@ -68,24 +77,25 @@ async def get_user(
     return UserReadSchema.model_validate(db_user)
 
 
-@router.patch("/me/update", response_model=UserReadSchema)
+@router.patch("/me/update")
 async def update_user(
-    user_update: UserUpdateSchema,
+    user_update: UserUpdateSchema = Body(...),
     current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+    update_data = user_update.model_dump(exclude_unset=True)
+
+    password_changed = False
+    if "password" in update_data and update_data["password"]:
+        update_data["hashed_password"] = hash_password(update_data.pop("password"))
+        password_changed = True
+
     await session.execute(
-        update(UsersOrm)
-        .where(UsersOrm.id == current_user.id)
-        .values(**user_update.model_dump(exclude_unset=True))
+        update(UsersOrm).where(UsersOrm.id == current_user.id).values(**update_data)
     )
     await session.commit()
 
-    result = await session.execute(
-        select(UsersOrm).where(UsersOrm.id == current_user.id)
-    )
-    updated_user = result.scalar_one_or_none()
-    if not updated_user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    return UserReadSchema.model_validate(updated_user)
+    if password_changed:
+        return {"message": "Password has been updated successfully"}
+    else:
+        return {"message": "User profile updated successfully"}
