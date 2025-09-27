@@ -32,7 +32,7 @@ async def create_user(
     )
     token = secrets.token_urlsafe(32)
     db_user.activation_token = token
-    print(f"localhost:8000/docs/users/activate/{token}")
+    print(f"127.0.0.1:8000/docs/users/activate/{token}")
     session.add(db_user)
     try:
         await session.flush()
@@ -124,3 +124,14 @@ async def activate_user(token: str, session: AsyncSession = Depends(get_session)
     session.add(user)
     await session.commit()
     return {"message": "User activated successfully"}
+
+
+@router.delete("/delete")
+async def delete_account(
+    user: UsersOrm = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    await session.delete(user)
+    await session.commit()
+
+    return {"status": 200, "detail": "Account deleted successfully"}
