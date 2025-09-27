@@ -10,7 +10,6 @@ from decimal import Decimal
 from enum import StrEnum
 
 from api.models.models import ExpenseTypeEnum, StatusEnum
-from api.schemas.users_schema import UserReadSchema
 
 
 class TypeEnum(StrEnum):
@@ -129,8 +128,10 @@ class SplitBillMemberBaseSchema(BaseModel):
     alias: Optional[str] = None
 
     # @field_validator("email", mode="before")
-    # def require_email_or_alias(cls, v, values):
-    #     if not v and not values.get("alias"):
+    # @classmethod
+    # def require_email_or_alias(cls, v, info):
+    #     alias = info.data.get("alias")
+    #     if not v and not alias:
     #         raise ValueError("At least one of 'email' or 'alias' must be provided")
     #     return v
 
@@ -139,15 +140,22 @@ class SplitBillMemberCreateSchema(SplitBillMemberBaseSchema):
     pass
 
 
-class SplitBillMemberReadSchema(SplitBillMemberBaseSchema):
+class SplitBillMemberReadSchema(BaseModel):
     id: int
+    email: Optional[EmailStr]
+    alias: Optional[str]
+    splitbill_id: int
     user_id: Optional[int]
     pending_user_id: Optional[int]
-    invited_by: int
-    user: Optional[UserReadSchema] = None
-    pending_user: Optional[PendingUserViewSchema] = None
+    invited_by: Optional[int]
 
     model_config = {"from_attributes": True}
+
+
+class SplitBillMemberUpdateSchema(BaseModel):
+    id: int
+    alias: Optional[str]
+    email: Optional[EmailStr]
 
 
 class SplitBillMemberRemoveSchema(BaseModel):

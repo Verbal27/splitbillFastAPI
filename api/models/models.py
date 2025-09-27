@@ -59,6 +59,9 @@ class UsersOrm(Base):
         foreign_keys="SplitBillMembersOrm.invited_by",
         back_populates="inviter",
     )
+    password_resets: Mapped[list["PasswordResetOrm"]] = relationship(
+        "PasswordResetOrm", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 # ---------- SPLITBILLS ----------
@@ -300,4 +303,16 @@ class BalancesOrm(Base):
     )
     to_member: Mapped["SplitBillMembersOrm"] = relationship(
         "SplitBillMembersOrm", foreign_keys=[to_member_id], back_populates="balances_to"
+    )
+
+
+class PasswordResetOrm(Base):
+    __tablename__ = "passwordreset"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    token: Mapped[str] = mapped_column(unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    user: Mapped["UsersOrm"] = relationship(
+        "UsersOrm", back_populates="password_resets"
     )

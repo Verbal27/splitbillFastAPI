@@ -36,6 +36,7 @@ from ..schemas.splitbill_schema import (
     SplitBillMemberCreateSchema,
     SplitBillMemberReadSchema,
     SplitBillMemberRemoveSchema,
+    SplitBillMemberUpdateSchema,
     SplitBillReadSchema,
 )
 
@@ -473,3 +474,64 @@ async def remove_member(
     await session.commit()
 
     return {"detail": f"Member {member.alias or member.email} removed successfully"}
+
+
+@router.patch("/{splitbill_id}/modify-member", response_model=SplitBillMemberReadSchema)
+async def modify_member(
+    splitbill_id: int,
+    member_data: SplitBillMemberUpdateSchema,
+    session: AsyncSession = Depends(get_session),
+    current_user: UsersOrm = Depends(get_current_user),
+):
+    user_result = await session.execute(
+        select(UsersOrm).where(UsersOrm.id == current_user.id)
+    )
+    db_user = user_result.scalar_one_or_none()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="No user found")
+
+    splitbill_result = await session.execute(
+        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+    )
+    splitbill = splitbill_result.scalar_one_or_none()
+    if not splitbill:
+        raise HTTPException(status_code=404, detail="Splitbill not found")
+
+    if db_user.id != splitbill.owner_id:
+        raise HTTPException(status_code=403, detail="Only owner can modify members")
+
+    member_result = await session.execute(
+        select(SplitBillMembersOrm).where(SplitBillMembersOrm.id == member_data.id)
+    )
+    member = member_result.scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if member_data.alias is not None:
+        member.alias = member_data.alias
+    if member_data.email is not None:
+        member.email = member_data.email
+
+    if member_data.email is not None:
+        result = await session.execute(
+            select(UsersOrm).where(UsersOrm.email == member_data.email)
+        )
+        new_user = result.scalar_one_or_none()
+
+        member.email = member_data.email
+
+        if new_user:
+            member.user_id = new_user.id
+            member.pending_user_id = None
+        else:
+            pending_user = PendingUsersOrm(email=member_data.email, alias=member.alias)
+            session.add(pending_user)
+            await session.flush()
+            member.pending_user_id = pending_user.id
+            member.user_id = None
+
+    session.add(member)
+    await session.flush()
+    await session.refresh(member)
+    await session.commit()
+    return SplitBillMemberReadSchema.model_validate(member, from_attributes=True)

@@ -1,5 +1,6 @@
 import secrets
 from fastapi import APIRouter, Body, Depends, HTTPException
+from pydantic import EmailStr
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +8,7 @@ from ..core.auth import get_current_user, hash_password
 
 from ..db.database import get_session
 from ..models.models import (
+    PasswordResetOrm,
     SplitBillMembersOrm,
     UserStatusEnum,
     UsersOrm,
@@ -14,6 +16,7 @@ from ..models.models import (
 )
 from ..schemas.users_schema import (
     UserCreateSchema,
+    UserPasswordUpdateSchema,
     UserReadSchema,
     UserUpdateSchema,
 )
@@ -72,6 +75,50 @@ async def create_user(
     res = UserReadSchema.model_validate(user_dict)
     await session.commit()
     return res
+
+
+@router.post("/reset-password")
+async def reset_request(email: EmailStr, session: AsyncSession = Depends(get_session)):
+    db_user = await session.execute(select(UsersOrm).where(UsersOrm.email == email))
+    user = db_user.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User with that email not found")
+
+    generated_token = secrets.token_urlsafe()
+    reset = PasswordResetOrm(token=generated_token, user_id=user.id)
+
+    session.add(reset)
+    await session.commit()
+    await session.refresh(reset)
+
+    return {"status": 200, "detail": "Token generated successfully"}
+
+
+@router.post("/reset-password-complete")
+async def reset_complete(
+    token: str,
+    user_update: UserPasswordUpdateSchema = Body(...),
+    session: AsyncSession = Depends(get_session),
+):
+    user_token = await session.execute(
+        select(PasswordResetOrm).where(PasswordResetOrm.token == token)
+    )
+    request = user_token.scalar_one_or_none()
+
+    if not request:
+        raise HTTPException(status_code=404, detail="No request found for this token")
+
+    update_data = user_update.model_dump(exclude_unset=True)
+    update_data["hashed_password"] = hash_password(update_data.pop("password"))
+
+    await session.execute(
+        update(UsersOrm).where(UsersOrm.id == request.user_id).values(**update_data)
+    )
+
+    await session.delete(request)
+    await session.commit()
+
+    return {"status": 200, "detail": "Password reset successfully"}
 
 
 @router.get("/me", response_model=UserReadSchema)

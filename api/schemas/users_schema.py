@@ -51,3 +51,12 @@ class UserUpdateSchema(BaseModel):
     username: Optional[Username] = None
     email: Optional[EmailStr] = None
     password: Optional[Password] = None
+
+
+class UserPasswordUpdateSchema(BaseModel):
+    password: Password
+
+
+class PasswordResetSchema(BaseModel):
+    token: str
+    user_id: int
