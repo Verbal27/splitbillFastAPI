@@ -18,7 +18,7 @@ async_engine = create_async_engine(
 )
 
 # Session engine
-async_session_factory = async_sessionmaker(async_engine)
+async_session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
 
 
 # Session creation

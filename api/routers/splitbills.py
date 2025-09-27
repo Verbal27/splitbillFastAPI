@@ -33,6 +33,9 @@ from ..schemas.splitbill_schema import (
     MoneyGivenCreateSchema,
     MoneyGivenReadSchema,
     SplitBillCreateSchema,
+    SplitBillMemberCreateSchema,
+    SplitBillMemberReadSchema,
+    SplitBillMemberRemoveSchema,
     SplitBillReadSchema,
 )
 
@@ -237,7 +240,7 @@ async def create_expense(
 
         for a in expense_data.assignments:
             share_amount = (
-                db_expense.amount * (a.share_amount / Decimal("100"))
+                db_expense.amount * (a.share_amount / Decimal("100"))  # type: ignore
             ).quantize(Decimal("0.01"))
 
             assignment = ExpenseAssignmentOrm(
@@ -362,3 +365,111 @@ async def create_comment(
     await session.refresh(db_comment)
 
     return CommentReadSchema.model_validate(db_comment)
+
+
+@router.post("/{splitbill_id}/add-members", response_model=SplitBillMemberReadSchema)
+async def add_members(
+    member_data: SplitBillMemberCreateSchema,
+    splitbill_id: int,
+    current_user: UsersOrm = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(
+        select(UsersOrm).where(UsersOrm.id == current_user.id)
+    )
+    db_user = user_result.scalar_one_or_none()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="No user found")
+
+    splitbill_result = await session.execute(
+        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+    )
+    splitbill = splitbill_result.scalar_one_or_none()
+    if not splitbill:
+        raise HTTPException(status_code=404, detail="Splitbill not found")
+
+    if db_user.id != splitbill.owner_id:
+        raise HTTPException(status_code=403, detail="Only owner can add members")
+
+    invited_user = None
+    if member_data.email:
+        result = await session.execute(
+            select(UsersOrm).where(UsersOrm.email == member_data.email)
+        )
+        invited_user = result.scalar_one_or_none()
+
+    if invited_user:
+        member = SplitBillMembersOrm(
+            alias=member_data.alias,
+            email=invited_user.email,
+            splitbill_id=splitbill.id,
+            user_id=invited_user.id,
+            invited_by=current_user.id,
+        )
+    else:
+        pending_user = PendingUsersOrm(
+            email=member_data.email,
+            alias=member_data.alias,
+        )
+        session.add(pending_user)
+        await session.flush()
+
+        member = SplitBillMembersOrm(
+            alias=member_data.alias,
+            email=member_data.email,
+            splitbill_id=splitbill.id,
+            pending_user_id=pending_user.id,
+            invited_by=current_user.id,
+        )
+
+    session.add(member)
+    await session.commit()
+    await session.refresh(member)
+    return SplitBillMemberReadSchema.model_validate(member, from_attributes=True)
+
+
+@router.delete("/{splitbill_id}/remove-member")
+async def remove_member(
+    user_remove: SplitBillMemberRemoveSchema,
+    splitbill_id: int,
+    current_user: UsersOrm = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user_result = await session.execute(
+        select(UsersOrm).where(UsersOrm.id == current_user.id)
+    )
+    db_user = user_result.scalar_one_or_none()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="No user found")
+
+    splitbill_result = await session.execute(
+        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+    )
+    splitbill = splitbill_result.scalar_one_or_none()
+    if not splitbill:
+        raise HTTPException(status_code=404, detail="Splitbill not found")
+
+    if db_user.id != splitbill.owner_id:
+        raise HTTPException(status_code=403, detail="Only the owner can remove members")
+
+    member_result = await session.execute(
+        select(SplitBillMembersOrm).where(
+            SplitBillMembersOrm.id == user_remove.id,
+            SplitBillMembersOrm.splitbill_id == splitbill_id,
+        )
+    )
+    member = member_result.scalar_one_or_none()
+    if not member:
+        raise HTTPException(
+            status_code=404, detail="Member not found in this splitbill"
+        )
+
+    if member.user_id == splitbill.owner_id:
+        raise HTTPException(
+            status_code=400, detail="Cannot remove the owner from the splitbill"
+        )
+
+    await session.delete(member)
+    await session.commit()
+
+    return {"detail": f"Member {member.alias or member.email} removed successfully"}
