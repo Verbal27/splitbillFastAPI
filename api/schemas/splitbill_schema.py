@@ -150,6 +150,10 @@ class SplitBillMemberReadSchema(SplitBillMemberBaseSchema):
     model_config = {"from_attributes": True}
 
 
+class SplitBillMemberRemoveSchema(BaseModel):
+    id: int
+
+
 class SplitBillBaseSchema(BaseModel):
     title: str
     currency: str
