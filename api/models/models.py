@@ -209,14 +209,14 @@ class ExpenseAssignmentOrm(Base):
     )
 
     expense_id: Mapped[int] = mapped_column(
-        ForeignKey("expenses.id", ondelete="CASCADE")
+        ForeignKey("expenses.id", ondelete="CASCADE"), nullable=False
     )
     expense: Mapped["ExpensesOrm"] = relationship(
         "ExpensesOrm", back_populates="assignments"
     )
 
     member_id: Mapped[int] = mapped_column(
-        ForeignKey("splitbillmembers.id", ondelete="CASCADE")
+        ForeignKey("splitbillmembers.id", ondelete="CASCADE"), nullable=False
     )
 
 

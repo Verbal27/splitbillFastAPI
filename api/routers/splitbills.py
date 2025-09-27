@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,6 +30,7 @@ from ..schemas.splitbill_schema import (
     CommentReadSchema,
     ExpenseCreateSchema,
     ExpenseReadSchema,
+    ExpenseUpdateSchema,
     MoneyGivenCreateSchema,
     MoneyGivenReadSchema,
     SplitBillCreateSchema,
@@ -82,19 +83,6 @@ async def list_all(
         SplitBillReadSchema.model_validate(sb, from_attributes=True)
         for sb in splitbills_list
     ]
-
-
-@router.get("/{splitbill_id}", response_model=SplitBillReadSchema)
-async def read_splitbill(
-    splitbill_id: int,
-    session: AsyncSession = Depends(get_session),
-    current_user: UsersOrm = Depends(get_current_user),
-):
-    splitbill = await get_splitbill_view(session, splitbill_id)
-    if not splitbill:
-        raise HTTPException(status_code=404, detail="Split bill not found")
-
-    return SplitBillReadSchema.model_validate(splitbill)
 
 
 @router.post("/", response_model=SplitBillReadSchema)
@@ -159,6 +147,19 @@ async def create_splitbill(
     res = SplitBillReadSchema.model_validate(splitbill_view)
     await session.commit()
     return res
+
+
+@router.get("/{splitbill_id}", response_model=SplitBillReadSchema)
+async def read_splitbill(
+    splitbill_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: UsersOrm = Depends(get_current_user),
+):
+    splitbill = await get_splitbill_view(session, splitbill_id)
+    if not splitbill:
+        raise HTTPException(status_code=404, detail="Split bill not found")
+
+    return SplitBillReadSchema.model_validate(splitbill)
 
 
 @router.get("/{splitbill_id}/expenses", response_model=List[ExpenseReadSchema])
@@ -283,6 +284,132 @@ async def create_expense(
     await session.commit()
     await session.refresh(db_expense)
     return db_expense
+
+
+@router.patch("/{splitbill_id}/expenses/{exp_id}")
+async def update_expense(
+    splitbill_id: int,
+    exp_id: int,
+    new_data: ExpenseUpdateSchema,
+    current_user: UsersOrm = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        result = await session.execute(
+            select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+        )
+        db_splitbill = result.scalar_one_or_none()
+        if not db_splitbill:
+            raise HTTPException(status_code=404, detail="Splitbill not found")
+
+        result = await session.execute(
+            select(ExpensesOrm).where(ExpensesOrm.id == exp_id)
+        )
+        db_exp = result.scalar_one_or_none()
+        if not db_exp:
+            raise HTTPException(status_code=404, detail="Expense not found")
+
+        if current_user.id != db_splitbill.owner_id:
+            raise HTTPException(
+                status_code=403, detail="Only owner can modify expenses"
+            )
+
+        if new_data.title is not None:
+            db_exp.title = new_data.title
+        if new_data.amount is not None:
+            db_exp.amount = new_data.amount
+        if new_data.type is not None:
+            db_exp.type = new_data.type
+        if new_data.paid_by_id is not None:
+            member_ids = [m.user_id for m in db_splitbill.members]
+            if new_data.paid_by_id not in member_ids:
+                raise HTTPException(
+                    status_code=400, detail="Paid by user must be a splitbill member"
+                )
+            db_exp.paid_by_id = new_data.paid_by_id
+
+        await session.execute(
+            delete(ExpenseAssignmentOrm).where(
+                ExpenseAssignmentOrm.expense_id == db_exp.id
+            )
+        )
+
+        result = await session.execute(
+            select(SplitBillMembersOrm).where(
+                SplitBillMembersOrm.splitbill_id == splitbill_id
+            )
+        )
+        members = result.scalars().all()
+
+        if db_exp.type == ExpenseTypeEnum.equal:
+            share_per_member = db_exp.amount / len(members)
+            for member in members:
+                session.add(
+                    ExpenseAssignmentOrm(
+                        expense_id=db_exp.id,
+                        member_id=member.id,
+                        share_amount=share_per_member,
+                    )
+                )
+
+        elif db_exp.type == ExpenseTypeEnum.percentage:
+            if not new_data.assignments:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Assignments required for percentage expense",
+                )
+            total_percentage = sum(
+                (a.share_amount or Decimal("0")) for a in new_data.assignments
+            )
+            if total_percentage != 100:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Percentages must total 100, got {total_percentage}",
+                )
+            for a in new_data.assignments:
+                share_amount = (
+                    db_exp.amount * (a.share_amount / Decimal("100"))  # type: ignore
+                ).quantize(Decimal("0.01"))
+                session.add(
+                    ExpenseAssignmentOrm(
+                        expense_id=db_exp.id,
+                        member_id=a.member_id,
+                        share_amount=share_amount,
+                    )
+                )
+
+        elif db_exp.type == ExpenseTypeEnum.custom:
+            if not new_data.assignments:
+                raise HTTPException(
+                    status_code=400, detail="Assignments required for custom expense"
+                )
+            total_amount = sum(
+                (a.share_amount or Decimal("0")) for a in new_data.assignments
+            )
+            if total_amount != db_exp.amount:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Assignments must total {db_exp.amount}, got {total_amount}",
+                )
+            for a in new_data.assignments:
+                session.add(
+                    ExpenseAssignmentOrm(
+                        expense_id=db_exp.id,
+                        member_id=a.member_id,
+                        share_amount=a.share_amount,
+                    )
+                )
+
+        await session.commit()
+        await session.refresh(db_exp)
+
+        return db_exp
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/{splitbill_id}/calculate-balances")
