@@ -52,6 +52,16 @@ class ExpenseReadSchema(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ExpenseUpdateSchema(BaseModel):
+    title: Optional[str]
+    amount: Optional[Decimal]
+    type: Optional[ExpenseTypeEnum]
+    paid_by_id: Optional[int]
+    assignments: Optional[list[ExpenseAssignmentViewSchema]]
+
+    model_config = {"from_attributes": True}
+
+
 # ---------- MONEY GIVEN ----------
 class MoneyGivenBaseSchema(BaseModel):
     title: str
