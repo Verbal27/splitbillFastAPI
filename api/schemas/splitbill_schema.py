@@ -84,6 +84,13 @@ class MoneyGivenReadSchema(MoneyGivenBaseSchema):
     model_config = {"from_attributes": True}
 
 
+class MoneyGivenUpdateSchema(BaseModel):
+    title: Optional[str]
+    amount: Optional[Decimal]
+    given_by: Optional[int]
+    given_to: Optional[int]
+
+
 # ---------- COMMENTS ----------
 class CommentBaseSchema(BaseModel):
     text: Annotated[str, StringConstraints(min_length=10, max_length=500)]

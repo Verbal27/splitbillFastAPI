@@ -33,6 +33,7 @@ from ..schemas.splitbill_schema import (
     ExpenseUpdateSchema,
     MoneyGivenCreateSchema,
     MoneyGivenReadSchema,
+    MoneyGivenUpdateSchema,
     SplitBillCreateSchema,
     SplitBillMemberCreateSchema,
     SplitBillMemberReadSchema,
@@ -75,7 +76,6 @@ async def list_all(
 
     result = await session.execute(stmt)
     splitbills_list = result.scalars().all()
-
     if not splitbills_list:
         raise HTTPException(status_code=404, detail="No splitbills found")
 
@@ -283,6 +283,7 @@ async def create_expense(
 
     await session.commit()
     await session.refresh(db_expense)
+    await calculate_balances(splitbill.id, session)
     return db_expense
 
 
@@ -402,6 +403,7 @@ async def update_expense(
 
         await session.commit()
         await session.refresh(db_exp)
+        await calculate_balances(db_splitbill.id, session)
 
         return db_exp
 
@@ -412,14 +414,35 @@ async def update_expense(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{splitbill_id}/calculate-balances")
-async def calculate_splitbill_balances(
-    splitbill_id: int, session: AsyncSession = Depends(get_session)
+@router.delete("/{splitbill_id}/expenses/{exp_id}")
+async def delete_expense(
+    splitbill_id: int,
+    exp_id: int,
+    current_user: UsersOrm = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
 ):
-    balances = await calculate_balances(splitbill_id, session)
-    if balances is None:
+    splitbill = await session.execute(
+        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+    )
+    db_splitbill = splitbill.scalar_one_or_none()
+    if not db_splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
-    return balances
+
+    expense = await session.execute(select(ExpensesOrm).where(ExpensesOrm.id == exp_id))
+    db_exp = expense.scalar_one_or_none()
+    if not db_exp:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    if db_splitbill.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=403, detail="Only splitbill owner can delete expenses"
+        )
+
+    await session.delete(db_exp)
+    await session.commit()
+    await calculate_balances(db_splitbill.id, session)
+
+    return {"status": 200, "detail": "Deleted successfully"}
 
 
 @router.post("/{splitbill_id}/money-given", response_model=MoneyGivenReadSchema)
@@ -455,7 +478,95 @@ async def create_money_given(
 
     await session.commit()
     await session.refresh(db_transaction)
+
     return MoneyGivenReadSchema.model_validate(db_transaction)
+
+
+@router.patch(
+    "/{splitbill_id}/money-given/{mg_id}", response_model=MoneyGivenReadSchema
+)
+async def modify_transaction(
+    splitbill_id: int,
+    mg_id: int,
+    new_data: MoneyGivenUpdateSchema,
+    session: AsyncSession = Depends(get_session),
+    current_user: UsersOrm = Depends(get_current_user),
+):
+    result = await session.execute(
+        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+    )
+    db_splitbill = result.scalar_one_or_none()
+    if not db_splitbill:
+        raise HTTPException(status_code=404, detail="Splitbill not found")
+
+    result = await session.execute(
+        select(MoneyGivenOrm).where(MoneyGivenOrm.id == mg_id)
+    )
+    db_mg = result.scalar_one_or_none()
+    if not db_mg:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    if db_splitbill.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=403, detail="Only splitbill owner can modify transactions"
+        )
+
+    member_ids = [m.user_id for m in db_splitbill.members]
+
+    if new_data.title is not None:
+        db_mg.title = new_data.title
+    if new_data.amount is not None:
+        db_mg.amount = new_data.amount
+    if new_data.given_by is not None:
+        if new_data.given_by not in member_ids:
+            raise HTTPException(
+                status_code=400, detail="Given_by user must be a splitbill member"
+            )
+        db_mg.given_by = new_data.given_by
+    if new_data.given_to is not None:
+        if new_data.given_to not in member_ids:
+            raise HTTPException(
+                status_code=400, detail="Given_to user must be a splitbill member"
+            )
+        db_mg.given_to = new_data.given_to
+
+    await session.commit()
+    await session.refresh(db_mg)
+    await calculate_balances(db_splitbill.id, session)
+    return db_mg
+
+
+@router.delete("/{splitbill_id}/money-given/{mg_id}")
+async def delete_transaction(
+    splitbill_id: int,
+    mg_id: int,
+    current_user: UsersOrm = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+    )
+    db_splitbill = result.scalar_one_or_none()
+    if not db_splitbill:
+        raise HTTPException(status_code=404, detail="Splitbill not found")
+
+    result = await session.execute(
+        select(MoneyGivenOrm).where(MoneyGivenOrm.id == mg_id)
+    )
+    db_mg = result.scalar_one_or_none()
+    if not db_mg:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    if db_splitbill.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=403, detail="Only splitbill owner can delete transactions"
+        )
+
+    await session.delete(db_mg)
+    await session.commit()
+    await calculate_balances(db_splitbill.id, session)
+
+    return {"status": 200, "detail": "Deleted successfully"}
 
 
 @router.post("/{splitbill_id}/comments", response_model=CommentReadSchema)
