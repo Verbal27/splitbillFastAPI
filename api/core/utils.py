@@ -1,5 +1,5 @@
 from decimal import Decimal
-from sqlalchemy import delete, select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,7 +34,7 @@ async def get_splitbill_view(session: AsyncSession, splitbill_id: int):
 
 
 async def calculate_balances(splitbill_id: int, session: AsyncSession):
-    """Recalculate balances for a splitbill, preserving settled balances."""
+    # Load splitbill with members, expenses, assignments, and money_given
     stmt = (
         select(SplitBillsOrm)
         .where(SplitBillsOrm.id == splitbill_id)
@@ -50,125 +50,63 @@ async def calculate_balances(splitbill_id: int, session: AsyncSession):
     if not splitbill:
         return None
 
-    member_balances = {}
-    for member in splitbill.members:
-        net_paid = sum(
-            exp.amount for exp in splitbill.expenses if exp.paid_by_id == member.id
-        )
-        net_share = sum(
-            assign.share_amount
-            for exp in splitbill.expenses
-            for assign in exp.assignments
-            if assign.member_id == member.id
-        )
-        money_out = sum(
-            mg.amount for mg in splitbill.money_given if mg.given_by == member.id
-        )
-        money_in = sum(
-            mg.amount for mg in splitbill.money_given if mg.given_to == member.id
-        )
+    # Build member balances
+    member_balances = {m.id: {} for m in splitbill.members}
 
-        balance = (
-            Decimal(net_paid)
-            - Decimal(net_share)
-            + Decimal(money_in)
-            - Decimal(money_out)
-        ).quantize(Decimal("0.01"))
-        member_balances[member.id] = balance
+    for exp in splitbill.expenses:
+        payer_id = exp.paid_by_id
+        for assign in exp.assignments:
+            debtor_id = assign.member_id
+            if debtor_id == payer_id:
+                continue
+            member_balances[debtor_id].setdefault(payer_id, Decimal("0.00"))
+            member_balances[debtor_id][payer_id] += Decimal(assign.share_amount)
 
-    creditors = [
-        {"id": m_id, "balance": b} for m_id, b in member_balances.items() if b > 0
-    ]
-    debtors = [
-        {"id": m_id, "balance": b} for m_id, b in member_balances.items() if b < 0
-    ]
+    for mg in splitbill.money_given:
+        giver_id = mg.given_by
+        receiver_id = mg.given_to
+        if giver_id == receiver_id:
+            continue
+        member_balances[receiver_id].setdefault(giver_id, Decimal("0.00"))
+        member_balances[receiver_id][giver_id] += Decimal(mg.amount)
 
+    # Netting balances
+    cleaned_balances = {}
+    for debtor, creditors in member_balances.items():
+        for creditor, amount in list(creditors.items()):
+            if creditor in member_balances and debtor in member_balances[creditor]:
+                net = amount - member_balances[creditor][debtor]
+                if net > 0:
+                    cleaned_balances.setdefault(debtor, {})[creditor] = net
+                elif net < 0:
+                    cleaned_balances.setdefault(creditor, {})[debtor] = -net
+                member_balances[creditor].pop(debtor, None)
+            else:
+                cleaned_balances.setdefault(debtor, {})[creditor] = amount
+
+    # Update old balances to 'settled' instead of deleting
     await session.execute(
-        delete(BalancesOrm).where(
+        update(BalancesOrm)
+        .where(
             BalancesOrm.splitbill_id == splitbill_id,
             BalancesOrm.status == StatusEnum.active,
         )
+        .values(status=StatusEnum.settled, amount=Decimal("0.00"))
     )
 
-    for debtor in debtors:
-        for creditor in creditors:
-            if debtor["balance"] == 0:
-                break
-            amount = min(-debtor["balance"], creditor["balance"]).quantize(
-                Decimal("0.01")
-            )
-            if amount == 0:
+    # Add new balances
+    for debtor, creditors in cleaned_balances.items():
+        for creditor, amount in creditors.items():
+            if amount <= 0:
                 continue
-
-            new_balance = BalancesOrm(
-                from_member_id=debtor["id"],
-                to_member_id=creditor["id"],
-                splitbill_id=splitbill_id,
-                amount=amount,
-                status=StatusEnum.active,
+            session.add(
+                BalancesOrm(
+                    splitbill_id=splitbill_id,
+                    from_member_id=debtor,
+                    to_member_id=creditor,
+                    amount=amount.quantize(Decimal("0.01")),
+                    status=StatusEnum.active,
+                )
             )
-            session.add(new_balance)
-
-            debtor["balance"] += amount
-            creditor["balance"] -= amount
 
     await session.commit()
-
-
-async def _apply_money_given_to_balances(
-    session: AsyncSession,
-    splitbill_id: int,
-    giver_member_id: int,
-    recipient_member_id: int,
-    amount: Decimal,
-):
-    """Apply a money-given transaction, adjusting balances correctly."""
-    amount = Decimal(amount).quantize(Decimal("0.01"))
-
-    # Step 1: Check if recipient owes giver (opposite balance)
-    res = await session.execute(
-        select(BalancesOrm).where(
-            BalancesOrm.from_member_id == recipient_member_id,
-            BalancesOrm.to_member_id == giver_member_id,
-            BalancesOrm.splitbill_id == splitbill_id,
-        )
-    )
-    opposite = res.scalar_one_or_none()
-
-    if opposite:
-        if amount < opposite.amount:
-            opposite.amount = (opposite.amount - amount).quantize(Decimal("0.01"))
-            if opposite.amount == 0:
-                opposite.status = StatusEnum.settled
-            return
-        elif amount == opposite.amount:
-            opposite.status = StatusEnum.settled
-            return
-        else:
-            remaining = (amount - opposite.amount).quantize(Decimal("0.01"))
-            await session.delete(opposite)
-            amount = remaining  # continue with remaining amount as new debt
-
-    # Step 2: Check if giver already owes recipient (direct balance)
-    res = await session.execute(
-        select(BalancesOrm).where(
-            BalancesOrm.from_member_id == giver_member_id,
-            BalancesOrm.to_member_id == recipient_member_id,
-            BalancesOrm.splitbill_id == splitbill_id,
-        )
-    )
-    direct = res.scalar_one_or_none()
-
-    if direct:
-        direct.amount = (direct.amount + amount).quantize(Decimal("0.01"))
-        direct.status = StatusEnum.active
-    else:
-        # Step 3: No balance exists in either direction, create new balance
-        new_bal = BalancesOrm(
-            from_member_id=giver_member_id,
-            to_member_id=recipient_member_id,
-            splitbill_id=splitbill_id,
-            amount=amount,
-            status=StatusEnum.active,
-        )
-        session.add(new_bal)
