@@ -2,6 +2,8 @@ from decimal import Decimal
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from fastapi_mail import FastMail, MessageSchema
+from api.core.config import settings
 
 from api.models.models import (
     BalancesOrm,
@@ -110,3 +112,38 @@ async def calculate_balances(splitbill_id: int, session: AsyncSession):
             )
 
     await session.commit()
+
+
+fm = FastMail(settings.mail_conf)
+
+
+async def send_add_email(recipient: str, splitbill_title: str, added_by: str):
+    message = MessageSchema(
+        subject="Someone added you to SplitBill",
+        recipients=[recipient],
+        body=f"You were added to SplitBill '{splitbill_title}' by {added_by}.",
+        subtype="plain",  # type: ignore
+    )
+    await fm.send_message(message)
+
+
+async def send_activation_email(user_email: str, token: str):
+    activation_link = f"{settings.url}/activate?token={token}"
+    message = MessageSchema(
+        subject="Activate Your Account",
+        recipients=[user_email],
+        body=f"Welcome! Please activate your account by clicking the link: {activation_link}",
+        subtype="plain",
+    )
+    await fm.send_message(message)
+
+
+async def send_reset_token(user_email: str, token: str):
+    reset_link = f"{settings.url}/reset-password-complete?token={token}"
+    message = MessageSchema(
+        subject="Reset password",
+        recipients=[user_email],
+        body=f"You requested to reset password. Do it following this link: {reset_link}",
+        subtype="plain",
+    )
+    await fm.send_message(message)

@@ -4,6 +4,8 @@ from pydantic import EmailStr
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.utils import send_activation_email, send_reset_token
+
 from ..core.auth import get_current_user, hash_password
 
 from ..db.database import get_session
@@ -74,6 +76,7 @@ async def create_user(
     }
     res = UserReadSchema.model_validate(user_dict)
     await session.commit()
+    await send_activation_email(db_user.email, token)
     return res
 
 
@@ -90,6 +93,8 @@ async def reset_request(email: EmailStr, session: AsyncSession = Depends(get_ses
     session.add(reset)
     await session.commit()
     await session.refresh(reset)
+
+    await send_reset_token(email, generated_token)
 
     return {"status": 200, "detail": "Token generated successfully"}
 
@@ -158,7 +163,11 @@ async def update_user(
 
 
 @router.get("/activate")
-async def activate_user(token: str, session: AsyncSession = Depends(get_session)):
+async def activate_user(
+    token: str,
+    current_user: UsersOrm = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(
         select(UsersOrm).where(UsersOrm.activation_token == token)
     )

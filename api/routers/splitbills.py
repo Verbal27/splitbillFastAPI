@@ -5,10 +5,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from api.core.utils import (
-    calculate_balances,
-    get_splitbill_view,
-)
+from api.core.utils import calculate_balances, get_splitbill_view, send_add_email
 from api.core.auth import get_current_user
 
 
@@ -109,6 +106,8 @@ async def create_splitbill(
     )
     session.add(owner_member)
 
+    members_to_notify = []
+
     for member_data in splitbill_data.members:
         user = None
         if member_data.email:
@@ -142,10 +141,20 @@ async def create_splitbill(
             )
 
         session.add(member)
+        if member.email:
+            members_to_notify.append(member.email)
 
     splitbill_view = await get_splitbill_view(session, db_splitbill.id)
     res = SplitBillReadSchema.model_validate(splitbill_view)
+
     await session.commit()
+
+    for email in members_to_notify:
+        await send_add_email(
+            email,
+            splitbill_title=splitbill_data.title,
+            added_by=current_user.username,
+        )
     return res
 
 
@@ -375,7 +384,7 @@ async def update_expense(
                 )
             for a in new_data.assignments:
                 share_amount = (
-                    Decimal(db_exp.amount) * (Decimal(a.share_amount) / 100)
+                    Decimal(db_exp.amount) * (Decimal(a.share_amount) / 100)  # type: ignore
                 ).quantize(Decimal("0.01"))
                 session.add(
                     ExpenseAssignmentOrm(
@@ -403,7 +412,7 @@ async def update_expense(
                     ExpenseAssignmentOrm(
                         expense_id=db_exp.id,
                         member_id=a.member_id,
-                        share_amount=Decimal(a.share_amount).quantize(Decimal("0.01")),
+                        share_amount=Decimal(a.share_amount).quantize(Decimal("0.01")),  # type: ignore
                     )
                 )
 
@@ -607,29 +616,40 @@ async def add_members(
     current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    user_result = await session.execute(
-        select(UsersOrm).where(UsersOrm.id == current_user.id)
-    )
-    db_user = user_result.scalar_one_or_none()
+    db_user = (
+        await session.execute(select(UsersOrm).where(UsersOrm.id == current_user.id))
+    ).scalar_one_or_none()
     if not db_user:
         raise HTTPException(status_code=404, detail="No user found")
 
-    splitbill_result = await session.execute(
-        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
-    )
-    splitbill = splitbill_result.scalar_one_or_none()
+    splitbill = (
+        await session.execute(
+            select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+        )
+    ).scalar_one_or_none()
     if not splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
 
     if db_user.id != splitbill.owner_id:
         raise HTTPException(status_code=403, detail="Only owner can add members")
 
+    existing_member = (
+        await session.execute(
+            select(SplitBillMembersOrm)
+            .where(SplitBillMembersOrm.splitbill_id == splitbill.id)
+            .where(SplitBillMembersOrm.email == member_data.email)
+        )
+    ).scalar_one_or_none()
+    if existing_member:
+        raise HTTPException(status_code=400, detail="Member already exists")
+
     invited_user = None
     if member_data.email:
-        result = await session.execute(
-            select(UsersOrm).where(UsersOrm.email == member_data.email)
-        )
-        invited_user = result.scalar_one_or_none()
+        invited_user = (
+            await session.execute(
+                select(UsersOrm).where(UsersOrm.email == member_data.email)
+            )
+        ).scalar_one_or_none()
 
     if invited_user:
         member = SplitBillMembersOrm(
@@ -658,6 +678,17 @@ async def add_members(
     session.add(member)
     await session.commit()
     await session.refresh(member)
+
+    if member.email:
+        try:
+            await send_add_email(
+                member.email,
+                splitbill_title=splitbill.title,
+                added_by=current_user.username,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=e)
+
     return SplitBillMemberReadSchema.model_validate(member, from_attributes=True)
 
 
@@ -715,36 +746,48 @@ async def modify_member(
     session: AsyncSession = Depends(get_session),
     current_user: UsersOrm = Depends(get_current_user),
 ):
-    user_result = await session.execute(
-        select(UsersOrm).where(UsersOrm.id == current_user.id)
-    )
-    db_user = user_result.scalar_one_or_none()
+    db_user = (
+        await session.execute(select(UsersOrm).where(UsersOrm.id == current_user.id))
+    ).scalar_one_or_none()
     if not db_user:
         raise HTTPException(status_code=404, detail="No user found")
 
-    splitbill_result = await session.execute(
-        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
-    )
-    splitbill = splitbill_result.scalar_one_or_none()
+    splitbill = (
+        await session.execute(
+            select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+        )
+    ).scalar_one_or_none()
     if not splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
 
     if db_user.id != splitbill.owner_id:
         raise HTTPException(status_code=403, detail="Only owner can modify members")
 
-    member_result = await session.execute(
-        select(SplitBillMembersOrm).where(SplitBillMembersOrm.id == member_data.id)
-    )
-    member = member_result.scalar_one_or_none()
+    member = (
+        await session.execute(
+            select(SplitBillMembersOrm).where(SplitBillMembersOrm.id == member_data.id)
+        )
+    ).scalar_one_or_none()
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
 
     if member_data.alias is not None:
         member.alias = member_data.alias
-    if member_data.email is not None:
-        member.email = member_data.email
 
     if member_data.email is not None:
+        existing_member = (
+            await session.execute(
+                select(SplitBillMembersOrm)
+                .where(SplitBillMembersOrm.splitbill_id == splitbill_id)
+                .where(SplitBillMembersOrm.email == member_data.email)
+                .where(SplitBillMembersOrm.id != member_data.id)
+            )
+        ).scalar_one_or_none()
+        if existing_member:
+            raise HTTPException(
+                status_code=400, detail="Email already used for another member"
+            )
+
         result = await session.execute(
             select(UsersOrm).where(UsersOrm.email == member_data.email)
         )
@@ -762,10 +805,20 @@ async def modify_member(
             member.pending_user_id = pending_user.id
             member.user_id = None
 
-    session.add(member)
-    await session.flush()
-    await session.refresh(member)
     await session.commit()
+    await session.refresh(member)
+
+    if member_data.email:
+        try:
+            await send_add_email(
+                member_data.email,
+                splitbill_title=splitbill.title,
+                added_by=current_user.username,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=e)
+            print(f"Failed to send email to {member_data.email}: {e}")
+
     return SplitBillMemberReadSchema.model_validate(member, from_attributes=True)
 
 
