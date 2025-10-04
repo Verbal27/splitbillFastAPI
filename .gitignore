@@ -8,7 +8,5 @@ wheels/
 
 # Virtual environments
 .venv
-alembic/env.py
-alembic.ini
 tests/
 api/.env

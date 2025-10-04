@@ -26,5 +26,8 @@ COPY .env .env
 # Expose the FastAPI port
 EXPOSE 8000
 
-# Run uvicorn directly (no --reload in production)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+COPY script.sh /app/script.sh
+RUN chmod +x /app/script.sh
+
+CMD ["bash", "/app/script.sh"]
+
