@@ -36,7 +36,6 @@ async def get_splitbill_view(session: AsyncSession, splitbill_id: int):
 
 
 async def calculate_balances(splitbill_id: int, session: AsyncSession):
-    # Load splitbill with members, expenses, assignments, and money_given
     stmt = (
         select(SplitBillsOrm)
         .where(SplitBillsOrm.id == splitbill_id)
@@ -52,7 +51,6 @@ async def calculate_balances(splitbill_id: int, session: AsyncSession):
     if not splitbill:
         return None
 
-    # Build member balances
     member_balances = {m.id: {} for m in splitbill.members}
 
     for exp in splitbill.expenses:
@@ -72,7 +70,6 @@ async def calculate_balances(splitbill_id: int, session: AsyncSession):
         member_balances[receiver_id].setdefault(giver_id, Decimal("0.00"))
         member_balances[receiver_id][giver_id] += Decimal(mg.amount)
 
-    # Netting balances
     cleaned_balances = {}
     for debtor, creditors in member_balances.items():
         for creditor, amount in list(creditors.items()):
@@ -86,7 +83,6 @@ async def calculate_balances(splitbill_id: int, session: AsyncSession):
             else:
                 cleaned_balances.setdefault(debtor, {})[creditor] = amount
 
-    # Update old balances to 'settled' instead of deleting
     await session.execute(
         update(BalancesOrm)
         .where(
@@ -96,7 +92,6 @@ async def calculate_balances(splitbill_id: int, session: AsyncSession):
         .values(status=StatusEnum.settled, amount=Decimal("0.00"))
     )
 
-    # Add new balances
     for debtor, creditors in cleaned_balances.items():
         for creditor, amount in creditors.items():
             if amount <= 0:
