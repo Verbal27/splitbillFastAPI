@@ -1,46 +1,30 @@
 # syntax=docker/dockerfile:1
 
-# Base image
 ARG PYTHON_VERSION=3.12.11
 FROM python:${PYTHON_VERSION}-slim AS base
 
-# Prevent Python from writing .pyc files and buffer logs
+# Environment setup
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PATH="/app/.venv/bin:$PATH"
 
-# Working directory
 WORKDIR /app
 
-# Install required system dependencies
-RUN apt-get update && apt-get install -y curl git && rm -rf /var/lib/apt/lists/*
+# Install uv globally
+RUN pip install --no-cache-dir uv
 
-# Install uv (modern Python package manager & runner)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
+# Copy project files
+COPY uv.lock pyproject.toml ./
 
-# Copy dependency files first for better caching
-COPY pyproject.toml uv.lock ./
+# Install dependencies into a venv inside /app
+RUN uv sync --frozen --no-cache
 
-# Install dependencies (locked versions)
-RUN uv sync --frozen --no-dev
-
-# Copy the rest of your source code
+# Copy the rest of the code and environment
 COPY . .
-
 COPY .env .env
 
-# Create a non-root user with a valid home directory
-ARG UID=10001
-RUN useradd -m -u "${UID}" appuser
-
-# Switch to non-root user
-USER appuser
-
-# Set HOME explicitly (helps uv, FastAPI, etc.)
-ENV HOME=/home/appuser
-
-# Expose FastAPI default port
+# Expose the FastAPI port
 EXPOSE 8000
 
-# Run your FastAPI app via uv
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run uvicorn directly (no --reload in production)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
