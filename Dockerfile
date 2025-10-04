@@ -21,7 +21,7 @@ RUN uv sync --frozen --no-cache
 
 # Copy the rest of the code and environment
 COPY . .
-COPY .env .env
+
 
 # Expose the FastAPI port
 EXPOSE 8000
