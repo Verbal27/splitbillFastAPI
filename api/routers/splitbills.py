@@ -852,7 +852,7 @@ async def modify_member(
     if member_data.alias is not None:
         member.alias = member_data.alias
 
-    if member_data.email is not None:
+    if member_data.email is not None and member_data.email != member.email:
         existing_member = (
             await session.execute(
                 select(SplitBillMembersOrm)
@@ -895,7 +895,6 @@ async def modify_member(
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=e)
-            print(f"Failed to send email to {member_data.email}: {e}")
 
     return SplitBillMemberReadSchema.model_validate(member, from_attributes=True)
 
