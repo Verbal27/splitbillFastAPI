@@ -33,14 +33,10 @@ class UserCreateSchema(BaseModel):
     username: Username
     email: EmailStr
     password: Password
-    status: UserStatusEnum = UserStatusEnum.pending
 
 
 class UserReadSchema(UserBaseSchema):
     id: int
-    username: str
-    email: str
-    status: UserStatusEnum
     date_joined: datetime
     date_updated: datetime
 

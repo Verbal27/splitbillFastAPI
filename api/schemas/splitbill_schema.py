@@ -35,7 +35,6 @@ class ExpenseCreateSchema(BaseModel):
     amount: Decimal
     type: ExpenseTypeEnum
     paid_by_id: int
-    splitbill_id: int
     assignments: Optional[list[ExpenseAssignmentCreateSchema]] = None
 
 
@@ -71,7 +70,6 @@ class MoneyGivenBaseSchema(BaseModel):
 class MoneyGivenCreateSchema(MoneyGivenBaseSchema):
     given_by: int
     given_to: int
-    splitbill_id: int
 
 
 class MoneyGivenReadSchema(MoneyGivenBaseSchema):
@@ -97,8 +95,7 @@ class CommentBaseSchema(BaseModel):
 
 
 class CommentCreateSchema(CommentBaseSchema):
-    author_id: int
-    splitbill_id: int
+    pass
 
 
 class CommentReadSchema(CommentBaseSchema):
@@ -185,8 +182,6 @@ class SplitBillBaseSchema(BaseModel):
 
 
 class SplitBillCreateSchema(SplitBillBaseSchema):
-    owner_id: int
-    status: StatusEnum = StatusEnum.active
     members: list[SplitBillMemberCreateSchema]
 
 

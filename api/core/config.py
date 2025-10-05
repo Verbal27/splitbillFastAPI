@@ -56,4 +56,4 @@ class Settings(BaseSettings):
     url: str | None = os.getenv("DATABASE_URL")
 
 
-settings = Settings()  # type: ignore
+settings = Settings()

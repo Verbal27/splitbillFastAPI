@@ -167,14 +167,43 @@ async def read_splitbill(
     splitbill = await get_splitbill_view(session, splitbill_id)
     if not splitbill:
         raise HTTPException(status_code=404, detail="Split bill not found")
+    user = await session.execute(
+        select(SplitBillMembersOrm).where(
+            SplitBillMembersOrm.splitbill_id == splitbill_id,
+            SplitBillMembersOrm.user_id == current_user.id,
+        )
+    )
+    member = user.scalar_one_or_none()
+    if not (member or splitbill.owner_id == current_user.id):
+        raise HTTPException(
+            status_code=403, detail="Not authorized to view this splitbill"
+        )
 
     return SplitBillReadSchema.model_validate(splitbill)
 
 
 @router.get("/{splitbill_id}/expenses", response_model=List[ExpenseReadSchema])
 async def read_expenses(
-    splitbill_id: int, session: AsyncSession = Depends(get_session)
+    splitbill_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: UsersOrm = Depends(get_current_user),
 ):
+    user = await session.execute(
+        select(SplitBillMembersOrm).where(
+            SplitBillMembersOrm.splitbill_id == splitbill_id,
+            SplitBillMembersOrm.user_id == current_user.id,
+        )
+    )
+    member = user.scalar_one_or_none()
+    if not member:
+        owner = await session.execute(
+            select(SplitBillsOrm.owner_id).where(SplitBillsOrm.id == splitbill_id)
+        )
+        if owner.scalar_one_or_none() != current_user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to view expenses"
+            )
+
     stmt = (
         select(ExpensesOrm)
         .where(ExpensesOrm.splitbill_id == splitbill_id)
@@ -190,14 +219,26 @@ async def read_expenses(
 async def create_expense(
     splitbill_id: int,
     expense_data: ExpenseCreateSchema,
+    current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+    # Always fetch splitbill first
     result = await session.execute(
         select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
     )
     splitbill = result.scalar_one_or_none()
     if not splitbill:
         raise HTTPException(status_code=404, detail="SplitBill not found")
+
+    # Then check membership/ownership
+    member_check = await session.execute(
+        select(SplitBillMembersOrm).where(
+            SplitBillMembersOrm.splitbill_id == splitbill_id,
+            SplitBillMembersOrm.user_id == current_user.id,
+        )
+    )
+    if not member_check.scalar_one_or_none() and splitbill.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to add expenses")
 
     db_expense = ExpensesOrm(
         title=expense_data.title,
@@ -466,8 +507,25 @@ async def delete_expense(
 async def create_money_given(
     splitbill_id: int,
     payload: MoneyGivenCreateSchema,
+    current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+    member_check = await session.execute(
+        select(SplitBillMembersOrm).where(
+            SplitBillMembersOrm.splitbill_id == splitbill_id,
+            SplitBillMembersOrm.user_id == current_user.id,
+        )
+    )
+    member = member_check.scalar_one_or_none()
+    owner_check = await session.execute(
+        select(SplitBillsOrm.owner_id).where(SplitBillsOrm.id == splitbill_id)
+    )
+    owner_id = owner_check.scalar_one_or_none()
+
+    if not (member or current_user.id == owner_id):
+        raise HTTPException(
+            status_code=403, detail="Not authorized to add transactions"
+        )
     new_tx = MoneyGivenOrm(
         title=payload.title,
         amount=payload.amount,
@@ -496,8 +554,11 @@ async def modify_transaction(
     current_user: UsersOrm = Depends(get_current_user),
 ):
     result = await session.execute(
-        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+        select(SplitBillsOrm)
+        .where(SplitBillsOrm.id == splitbill_id)
+        .options(selectinload(SplitBillsOrm.members))
     )
+
     db_splitbill = result.scalar_one_or_none()
     if not db_splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
@@ -576,30 +637,35 @@ async def delete_transaction(
 async def create_comment(
     splitbill_id: int,
     comment: CommentCreateSchema,
+    current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    result = await session.execute(
-        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
-    )
-    splitbill = result.scalar_one_or_none()
-
+    splitbill = (
+        await session.execute(
+            select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+        )
+    ).scalar_one_or_none()
     if not splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
 
-    author_result = await session.execute(
-        select(SplitBillMembersOrm).where(
-            SplitBillMembersOrm.splitbill_id == splitbill_id,
-            SplitBillMembersOrm.user_id == comment.author_id,
+    member = (
+        await session.execute(
+            select(SplitBillMembersOrm).where(
+                SplitBillMembersOrm.splitbill_id == splitbill_id,
+                SplitBillMembersOrm.user_id == current_user.id,
+            )
         )
-    )
-    author = author_result.scalar_one_or_none()
-    if not author:
+    ).scalar_one_or_none()
+
+    if not member and splitbill.owner_id != current_user.id:
         raise HTTPException(
-            status_code=400,
-            detail="Author must be a member of this splitbill",
+            status_code=403, detail="Not authorized to comment on this splitbill"
         )
+
     db_comment = CommentsOrm(
-        text=comment.text, author_id=comment.author_id, splitbill_id=splitbill_id
+        text=comment.text,
+        author_id=member.id if member else None,
+        splitbill_id=splitbill_id,
     )
 
     session.add(db_comment)
