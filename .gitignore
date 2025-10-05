@@ -10,3 +10,4 @@ wheels/
 .venv
 tests/
 .env
+sendgrid.env
