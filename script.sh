@@ -15,25 +15,18 @@ echo ""
 echo "⏳ Waiting for database at ${DB_HOST}:${DB_PORT}..."
 
 # We'll retry until asyncpg successfully connects
-until uv run python -c "
-import asyncpg, asyncio
-async def main():
-    try:
-        conn = await asyncpg.connect(
-            user='${DB_USER}',
-            password='${DB_PASS}',
-            database='${DB_NAME}',
-            host='${DB_HOST}',
-            port=${DB_PORT}
-        )
-        await conn.close()
-    except Exception as e:
-        raise SystemExit(str(e))
-asyncio.run(main())
-" >/dev/null 2>&1; do
+until uv run python -c "import asyncpg, asyncio; asyncio.run(asyncpg.connect(
+    user='${DB_USER:-$PGUSER}',
+    password='${DB_PASS:-$PGPASSWORD}',
+    database='${DB_NAME:-$PGDATABASE}',
+    host='${DB_HOST:-$PGHOST}',
+    port=${DB_PORT:-$PGPORT}
+))" >/dev/null 2>&1; do
     echo "   ❌ Database not ready yet, retrying in 2s..."
     sleep 2
 done
+
+
 
 echo "✅ Database is ready."
 
