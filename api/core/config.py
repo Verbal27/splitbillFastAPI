@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from fastapi_mail import ConnectionConfig
 from pydantic import SecretStr
@@ -7,12 +8,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    # Database
-    db_host: str
-    db_port: int
-    db_user: str
-    db_pass: str
-    db_name: str
+    db_host: str = os.getenv("DB_HOST", os.getenv("PGHOST", "localhost"))
+    db_port: int = int(os.getenv("DB_PORT", os.getenv("PGPORT", 5432)))
+    db_user: str = os.getenv("DB_USER", os.getenv("PGUSER", "postgres"))
+    db_pass: str = os.getenv("DB_PASS", os.getenv("PGPASSWORD", "secret"))
+    db_name: str = os.getenv("DB_NAME", os.getenv("PGDATABASE", "SplitBillFastApi"))
 
     @property
     def DATABASE_URL_asyncpg(self):
