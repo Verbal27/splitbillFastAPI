@@ -5,7 +5,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from api.core.utils import calculate_balances, get_splitbill_view, send_add_email
+from api.core.utils import (
+    calculate_balances,
+    ensure_active_splitbill,
+    get_splitbill_view,
+    send_add_email,
+)
 from api.core.auth import get_current_user
 
 
@@ -92,7 +97,6 @@ async def create_splitbill(
         title=splitbill_data.title,
         currency=splitbill_data.currency,
         owner_id=current_user.id,
-        status=splitbill_data.status,
     )
     session.add(db_splitbill)
     await session.flush()
@@ -221,6 +225,7 @@ async def create_expense(
     expense_data: ExpenseCreateSchema,
     current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    splitbill: SplitBillsOrm = Depends(ensure_active_splitbill),
 ):
     # Always fetch splitbill first
     result = await session.execute(
@@ -345,6 +350,7 @@ async def update_expense(
     new_data: ExpenseUpdateSchema,
     current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    splitbill: SplitBillsOrm = Depends(ensure_active_splitbill),
 ):
     try:
         result = await session.execute(
@@ -478,6 +484,7 @@ async def delete_expense(
     exp_id: int,
     current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    splitbill: SplitBillsOrm = Depends(ensure_active_splitbill),
 ):
     splitbill = await session.execute(
         select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
@@ -509,6 +516,7 @@ async def create_money_given(
     payload: MoneyGivenCreateSchema,
     current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    splitbill: SplitBillsOrm = Depends(ensure_active_splitbill),
 ):
     member_check = await session.execute(
         select(SplitBillMembersOrm).where(
@@ -552,6 +560,7 @@ async def modify_transaction(
     new_data: MoneyGivenUpdateSchema,
     session: AsyncSession = Depends(get_session),
     current_user: UsersOrm = Depends(get_current_user),
+    splitbill: SplitBillsOrm = Depends(ensure_active_splitbill),
 ):
     result = await session.execute(
         select(SplitBillsOrm)
@@ -606,6 +615,7 @@ async def delete_transaction(
     mg_id: int,
     current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    splitbill: SplitBillsOrm = Depends(ensure_active_splitbill),
 ):
     result = await session.execute(
         select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
@@ -681,6 +691,7 @@ async def add_members(
     splitbill_id: int,
     current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    splitbill: SplitBillsOrm = Depends(ensure_active_splitbill),
 ):
     db_user = (
         await session.execute(select(UsersOrm).where(UsersOrm.id == current_user.id))
@@ -764,6 +775,7 @@ async def remove_member(
     splitbill_id: int,
     current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    splitbill: SplitBillsOrm = Depends(ensure_active_splitbill),
 ):
     user_result = await session.execute(
         select(UsersOrm).where(UsersOrm.id == current_user.id)

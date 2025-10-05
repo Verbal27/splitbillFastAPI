@@ -1,11 +1,13 @@
 import os
+from fastapi import Depends, HTTPException
 from sendgrid import SendGridAPIClient, Mail
 from decimal import Decimal
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from api.core.config import settings
 
+from api.db.database import get_session
 from api.models.models import (
     BalancesOrm,
     ExpensesOrm,
@@ -13,6 +15,22 @@ from api.models.models import (
     SplitBillsOrm,
     StatusEnum,
 )
+
+
+async def ensure_active_splitbill(
+    splitbill_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    s = await session.execute(
+        select(SplitBillsOrm).where(
+            (SplitBillsOrm.id == splitbill_id)
+            & (SplitBillsOrm.status == StatusEnum.active)
+        )
+    )
+    db_s = s.scalar_one_or_none()
+    if not db_s:
+        raise HTTPException(status_code=403, detail="Cannot modify a settled splitbill")
+    return db_s
 
 
 async def get_splitbill_view(session: AsyncSession, splitbill_id: int):
@@ -51,6 +69,8 @@ async def calculate_balances(splitbill_id: int, session: AsyncSession):
     splitbill = result.scalar_one_or_none()
     if not splitbill:
         return None
+    if splitbill.status == StatusEnum.settled:
+        return
 
     member_balances = {m.id: {} for m in splitbill.members}
 
@@ -84,14 +104,19 @@ async def calculate_balances(splitbill_id: int, session: AsyncSession):
             else:
                 cleaned_balances.setdefault(debtor, {})[creditor] = amount
 
-    await session.execute(
-        update(BalancesOrm)
-        .where(
-            BalancesOrm.splitbill_id == splitbill_id,
-            BalancesOrm.status == StatusEnum.active,
-        )
-        .values(status=StatusEnum.settled, amount=Decimal("0.00"))
-    )
+    active_balances = {
+        b.id: b for b in splitbill.balances if b.status == StatusEnum.active
+    }
+
+    for bal_id, bal in active_balances.items():
+        debtor = bal.from_member_id
+        creditor = bal.to_member_id
+        if debtor in cleaned_balances and creditor in cleaned_balances[debtor]:
+            bal.amount = cleaned_balances[debtor][creditor].quantize(Decimal("0.01"))
+            del cleaned_balances[debtor][creditor]
+        else:
+            bal.status = StatusEnum.settled
+            bal.amount = bal.amount.quantize(Decimal("0.01"))
 
     for debtor, creditors in cleaned_balances.items():
         for creditor, amount in creditors.items():
