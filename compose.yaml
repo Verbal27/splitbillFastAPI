@@ -4,42 +4,37 @@ services:
   server:
     build:
       context: .
+    container_name: splitbills_server
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
-    environment:
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASS: secret
-      DB_NAME: splitbills
-      SECRET_KEY: supersecret
-      MAIL_USERNAME: your@mail.com
-      MAIL_PASSWORD: password
-      MAIL_FROM: your@mail.com
-      MAIL_SERVER: smtp.mail.com
-      MAIL_PORT: 587
-    # Optional: use a command script that waits for DB, runs migrations, and starts FastAPI
-    # command: ["bash", "/app/script.sh"]
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    command: ["bash", "/app/script.sh"]
 
   db:
     image: postgres:16
+    container_name: splitbills_db
     restart: always
+    env_file:
+      - .env
     environment:
-      POSTGRES_DB: splitbills
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
       interval: 5s
       timeout: 5s
       retries: 5
     ports:
-      - "5432:5432"
+      - "5433:5432"  
 
 volumes:
   db-data:

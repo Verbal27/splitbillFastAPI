@@ -1,33 +1,52 @@
 # syntax=docker/dockerfile:1
 
+# Use a slim Python base
 ARG PYTHON_VERSION=3.12.11
 FROM python:${PYTHON_VERSION}-slim AS base
 
-# Environment setup
+# ---------------------------
+#  Environment configuration
+# ---------------------------
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+# Let uv / Python binaries from the venv be first on PATH
 ENV PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 
-# Install uv globally
+# ---------------------------
+#  System dependencies
+# ---------------------------
+# Install minimal build tools (asyncpg sometimes needs libpq)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev gcc curl bash && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---------------------------
+#  Install uv and dependencies
+# ---------------------------
 RUN pip install --no-cache-dir uv
 
-# Copy project files
-COPY uv.lock pyproject.toml ./
+# Copy dependency files first for better caching
+COPY pyproject.toml uv.lock ./
 
-# Install dependencies into a venv inside /app
+# Sync dependencies without caching or re-downloading
 RUN uv sync --frozen --no-cache
 
-# Copy the rest of the code and environment
+# ---------------------------
+#  Copy application code
+# ---------------------------
 COPY . .
 
-
-# Expose the FastAPI port
-EXPOSE 8000
-
-COPY script.sh /app/script.sh
+# Ensure startup script is executable
 RUN chmod +x /app/script.sh
 
-CMD ["bash", "/app/script.sh"]
+# ---------------------------
+#  Expose FastAPI port
+# ---------------------------
+EXPOSE 8000
 
+# ---------------------------
+#  Entrypoint
+# ---------------------------
+CMD ["/bin/bash", "/app/script.sh"]
