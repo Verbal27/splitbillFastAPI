@@ -11,8 +11,6 @@ import sys
 # Add project root to path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-# Import Base and all models
-
 
 # Metadata for Alembic autogenerate
 target_metadata = Base.metadata
