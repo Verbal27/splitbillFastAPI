@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    url: str
+    url: str | None = os.getenv("DATABASE_URL")
 
 
 settings = Settings()  # type: ignore
