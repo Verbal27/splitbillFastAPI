@@ -162,7 +162,6 @@ async def create_splitbill(
             added_by=current_user.username,
             link=link,
         )
-    # Simply output the link
     print(f"Generated guest link: {link}")
     return res
 
@@ -232,7 +231,6 @@ async def create_expense(
     session: AsyncSession = Depends(get_session),
     splitbill: SplitBillsOrm = Depends(ensure_active_splitbill),
 ):
-    # Always fetch splitbill first
     result = await session.execute(
         select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
     )
@@ -240,7 +238,6 @@ async def create_expense(
     if not splitbill:
         raise HTTPException(status_code=404, detail="SplitBill not found")
 
-    # Then check membership/ownership
     member_check = await session.execute(
         select(SplitBillMembersOrm).where(
             SplitBillMembersOrm.splitbill_id == splitbill_id,
@@ -692,6 +689,7 @@ async def create_comment(
 
 @router.post("/{splitbill_id}/add-members", response_model=SplitBillMemberReadSchema)
 async def add_members(
+    request: Request,
     member_data: SplitBillMemberCreateSchema,
     splitbill_id: int,
     current_user: UsersOrm = Depends(get_current_user),
@@ -763,11 +761,14 @@ async def add_members(
 
     if member.email:
         try:
+            link = await generate_guest_link(splitbill.id, request, session)
             await send_add_email(
+                link,
                 member.email,
                 splitbill_title=splitbill.title,
                 added_by=current_user.username,
             )
+            print(link)
         except Exception as e:
             raise HTTPException(status_code=500, detail=e)
 
