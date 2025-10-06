@@ -1,5 +1,7 @@
+from datetime import datetime, timedelta, timezone
 import os
-from fastapi import Depends, HTTPException
+import secrets
+from fastapi import Depends, HTTPException, Request
 from sendgrid import SendGridAPIClient, Mail
 from decimal import Decimal
 from sqlalchemy import select
@@ -11,6 +13,7 @@ from api.db.database import get_session
 from api.models.models import (
     BalancesOrm,
     ExpensesOrm,
+    GuestsOrm,
     SplitBillMembersOrm,
     SplitBillsOrm,
     StatusEnum,
@@ -135,12 +138,31 @@ async def calculate_balances(splitbill_id: int, session: AsyncSession):
     await session.commit()
 
 
-async def send_add_email(recipient: str, splitbill_title: str, added_by: str):
+async def generate_guest_link(
+    splitbill_id: int, request: Request, session: AsyncSession
+):
+    token = secrets.token_urlsafe(32)
+    guest = GuestsOrm(
+        token=token,
+        splitbill_id=splitbill_id,
+        expires=datetime.now(tz=timezone.utc) + timedelta(days=7),
+    )
+    session.add(guest)
+    await session.commit()
+    base_url = str(request.base_url)
+    link = f"{base_url}guest-access/{token}"
+
+    return link
+
+
+async def send_add_email(
+    recipient: str, splitbill_title: str, added_by: str, link: str
+):
     message = Mail(
         from_email=os.environ.get("MAIL_FROM"),
         to_emails=recipient,
         subject="Someone added you to SplitBill",
-        html_content=f"You were added to SplitBill '{splitbill_title}' by {added_by}.",
+        html_content=f"You were added to SplitBill '{splitbill_title}' by {added_by}. If you don't have an account yet, you can view it here: {link}",
     )
     try:
         sg = SendGridAPIClient(os.environ.get("SENDGRID_API_KEY"))

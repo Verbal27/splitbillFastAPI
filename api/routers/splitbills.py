@@ -1,6 +1,6 @@
 from decimal import Decimal
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from api.core.utils import (
     calculate_balances,
     ensure_active_splitbill,
+    generate_guest_link,
     get_splitbill_view,
     send_add_email,
 )
@@ -89,6 +90,7 @@ async def list_all(
 
 @router.post("/", response_model=SplitBillReadSchema)
 async def create_splitbill(
+    request: Request,
     splitbill_data: SplitBillCreateSchema,
     session: AsyncSession = Depends(get_session),
     current_user: UsersOrm = Depends(get_current_user),
@@ -151,14 +153,17 @@ async def create_splitbill(
     splitbill_view = await get_splitbill_view(session, db_splitbill.id)
     res = SplitBillReadSchema.model_validate(splitbill_view)
 
-    await session.commit()
+    link = await generate_guest_link(db_splitbill.id, request, session)
 
     for email in members_to_notify:
         await send_add_email(
             email,
             splitbill_title=splitbill_data.title,
             added_by=current_user.username,
+            link=link,
         )
+    # Simply output the link
+    print(f"Generated guest link: {link}")
     return res
 
 

@@ -20,10 +20,10 @@ dependencies = [
     "sqlalchemy>=2.0.43",
     "uvicorn>=0.37.0",
 ]
+
 [tool.ruff.lint]
 select = ["F"]
-ignore = ["F841"]
+ignore = ["F841", "F403"]
+
 [tool.pyright]
 typeCheckingMode = "off"
-[tool.ruff]
-ignore = ["F403"]

@@ -1,3 +1,4 @@
+from datetime import datetime
 from sqlalchemy import (
     String,
     ForeignKey,
@@ -5,6 +6,8 @@ from sqlalchemy import (
     Enum as SAEnum,
     UniqueConstraint,
     func,
+    DateTime,
+    Boolean,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from decimal import Decimal
@@ -27,6 +30,22 @@ class ExpenseTypeEnum(str, enum.Enum):
     equal = "equal"
     percentage = "percentage"
     custom = "custom"
+
+
+# --------GuestSession-------
+class GuestsOrm(Base):
+    __tablename__ = "guest"
+
+    token: Mapped[str] = mapped_column(
+        String, unique=True, primary_key=True, index=True
+    )
+    splitbill_id: Mapped[int] = mapped_column(ForeignKey("splitbills.id"))
+    created: Mapped[created_at]
+    expires: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    used_by_user: Mapped[bool] = mapped_column(Boolean, default=False)
+    splitbill: Mapped["SplitBillsOrm"] = relationship(
+        "SplitBillsOrm", back_populates="guest_links"
+    )
 
 
 # ---------- USERS ----------
@@ -90,6 +109,9 @@ class SplitBillsOrm(Base):
     )
     balances: Mapped[list["BalancesOrm"]] = relationship(
         "BalancesOrm", back_populates="splitbill", cascade="all, delete-orphan"
+    )
+    guest_links: Mapped[list["GuestsOrm"]] = relationship(
+        "GuestsOrm", back_populates="splitbill", cascade="all, delete-orphan"
     )
 
     status: Mapped[StatusEnum] = mapped_column(
