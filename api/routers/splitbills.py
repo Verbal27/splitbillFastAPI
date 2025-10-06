@@ -763,10 +763,10 @@ async def add_members(
         try:
             link = await generate_guest_link(splitbill.id, request, session)
             await send_add_email(
-                link,
                 member.email,
                 splitbill_title=splitbill.title,
                 added_by=current_user.username,
+                link=link,
             )
             print(link)
         except Exception as e:
