@@ -712,7 +712,7 @@ async def add_members(
         await session.execute(
             select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
         )
-    ).scalar_one_or_none()
+    ).scalar_one_or_none()  # type: ignore
     if not splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
 
@@ -799,7 +799,7 @@ async def remove_member(
     splitbill_result = await session.execute(
         select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
     )
-    splitbill = splitbill_result.scalar_one_or_none()
+    splitbill = splitbill_result.scalar_one_or_none()  # type: ignore
     if not splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
 
@@ -832,6 +832,7 @@ async def remove_member(
 @router.patch("/{splitbill_id}/modify-member", response_model=SplitBillMemberReadSchema)
 async def modify_member(
     splitbill_id: int,
+    request: Request,
     member_data: SplitBillMemberUpdateSchema,
     session: AsyncSession = Depends(get_session),
     current_user: UsersOrm = Depends(get_current_user),
@@ -898,13 +899,16 @@ async def modify_member(
     await session.commit()
     await session.refresh(member)
 
-    if member_data.email:
+    if member.email:
         try:
+            link = await generate_guest_link(splitbill.id, request, session)
             await send_add_email(
-                member_data.email,
+                member.email,
                 splitbill_title=splitbill.title,
                 added_by=current_user.username,
+                link=link,
             )
+            print(link)
         except Exception as e:
             raise HTTPException(status_code=500, detail=e)
 
