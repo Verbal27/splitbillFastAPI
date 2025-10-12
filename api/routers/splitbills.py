@@ -234,7 +234,7 @@ async def create_expense(
     result = await session.execute(
         select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
     )
-    splitbill = result.scalar_one_or_none()
+    splitbill = result.scalar_one_or_none()  # type: ignore
     if not splitbill:
         raise HTTPException(status_code=404, detail="SplitBill not found")
 
@@ -270,11 +270,17 @@ async def create_expense(
         )
 
     if expense_data.type == ExpenseTypeEnum.equal:
-        share_per_member = db_expense.amount / len(members)
-        for member in members:
+        if expense_data.assignments:
+            member_ids = [a.member_id for a in expense_data.assignments]
+        else:
+            member_ids = [m.id for m in members]
+
+        share_per_member = db_expense.amount / len(member_ids)
+
+        for member_id in member_ids:
             assignment = ExpenseAssignmentOrm(
                 expense_id=db_expense.id,
-                member_id=member.id,
+                member_id=member_id,
                 share_amount=share_per_member,
             )
             session.add(assignment)
@@ -490,8 +496,8 @@ async def delete_expense(
 ):
     splitbill = await session.execute(
         select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
-    )
-    db_splitbill = splitbill.scalar_one_or_none()
+    )  # type: ignore
+    db_splitbill = splitbill.scalar_one_or_none()  # type: ignore
     if not db_splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
 

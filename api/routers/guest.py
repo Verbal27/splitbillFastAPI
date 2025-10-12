@@ -12,7 +12,6 @@ router = APIRouter()
 
 @router.get("/guest-access/{token}")
 async def view_as_guest(token: str, session: AsyncSession = Depends(get_session)):
-    # Fetch guest by token
     guest_result = await session.execute(
         select(GuestsOrm).where(GuestsOrm.token == token)
     )
@@ -24,7 +23,6 @@ async def view_as_guest(token: str, session: AsyncSession = Depends(get_session)
     if db_guest.expires and db_guest.expires < datetime.now(tz=timezone.utc):
         raise HTTPException(status_code=403, detail="Token expired")
 
-    # Fetch splitbill with all related objects eagerly loaded
     split_result = await session.execute(
         select(SplitBillsOrm)
         .options(
@@ -33,7 +31,7 @@ async def view_as_guest(token: str, session: AsyncSession = Depends(get_session)
             selectinload(SplitBillsOrm.expenses),
             selectinload(SplitBillsOrm.money_given),
             selectinload(SplitBillsOrm.comments),
-            selectinload(SplitBillsOrm.balances),  # eagerly load balances
+            selectinload(SplitBillsOrm.balances),
         )
         .where(SplitBillsOrm.id == db_guest.splitbill_id)
     )
@@ -44,7 +42,6 @@ async def view_as_guest(token: str, session: AsyncSession = Depends(get_session)
             status_code=404, detail="No splitbill found at this address"
         )
 
-    # Build response
     response = {
         "title": db_splitbill.title,
         "date_created": db_splitbill.date_created.isoformat(),
