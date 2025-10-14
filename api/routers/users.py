@@ -1,5 +1,5 @@
 import secrets
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import EmailStr
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +29,9 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 @router.post("/register", response_model=UserReadSchema)
 async def create_user(
-    user: UserCreateSchema, session: AsyncSession = Depends(get_session)
+    user: UserCreateSchema,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ):
     hashed_pw = hash_password(user.password)
     db_user = UsersOrm(
@@ -76,12 +78,14 @@ async def create_user(
     }
     res = UserReadSchema.model_validate(user_dict)
     await session.commit()
-    await send_activation_email(db_user.email, token)
+    await send_activation_email(db_user.email, request, token)
     return res
 
 
 @router.post("/reset-password")
-async def reset_request(email: EmailStr, session: AsyncSession = Depends(get_session)):
+async def reset_request(
+    email: EmailStr, request: Request, session: AsyncSession = Depends(get_session)
+):
     db_user = await session.execute(select(UsersOrm).where(UsersOrm.email == email))
     user = db_user.scalar_one_or_none()
     if not user:
@@ -94,7 +98,7 @@ async def reset_request(email: EmailStr, session: AsyncSession = Depends(get_ses
     await session.commit()
     await session.refresh(reset)
 
-    await send_reset_token(email, generated_token)
+    await send_reset_token(email, request, generated_token)
 
     return {"status": 200, "detail": "Token generated successfully"}
 
