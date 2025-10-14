@@ -7,7 +7,6 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from api.core.config import settings
 from dotenv import load_dotenv
 
 from api.db.database import get_session
@@ -178,8 +177,9 @@ async def send_add_email(
         print(str(e))
 
 
-async def send_activation_email(user_email: str, token: str):
-    activation_link = f"{settings.url}/activate?token={token}"
+async def send_activation_email(user_email: str, request: Request, token: str):
+    base_url = str(request.base_url)
+    activation_link = f"{base_url}/activate?token={token}"
     try:
         msg = resend.Emails.send(
             {
@@ -194,8 +194,9 @@ async def send_activation_email(user_email: str, token: str):
         print(str(e))
 
 
-async def send_reset_token(user_email: str, token: str):
-    reset_link = f"{settings.url}/reset-password-complete?token={token}"
+async def send_reset_token(user_email: str, request: Request, token: str):
+    base_url = str(request.base_url)
+    reset_link = f"{base_url}/reset-password-complete?token={token}"
     try:
         msg = resend.Emails.send(
             {
