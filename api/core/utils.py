@@ -1,13 +1,14 @@
-from datetime import datetime, timedelta, timezone
 import os
+import resend
 import secrets
+from datetime import datetime, timedelta, timezone
 from fastapi import Depends, HTTPException, Request
-from sendgrid import SendGridAPIClient, Mail
 from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from api.core.config import settings
+from dotenv import load_dotenv
 
 from api.db.database import get_session
 from api.models.models import (
@@ -18,6 +19,11 @@ from api.models.models import (
     SplitBillsOrm,
     StatusEnum,
 )
+
+load_dotenv()
+
+
+resend.api_key = os.environ["RESEND_API_KEY"]
 
 
 async def ensure_active_splitbill(
@@ -158,53 +164,47 @@ async def generate_guest_link(
 async def send_add_email(
     recipient: str, splitbill_title: str, added_by: str, link: str
 ):
-    message = Mail(
-        from_email=os.environ.get("MAIL_FROM"),
-        to_emails=recipient,
-        subject="Someone added you to SplitBill",
-        html_content=f"You were added to SplitBill '{splitbill_title}' by {added_by}. If you don't have an account yet, you can view it here: {link}",
-    )
     try:
-        sg = SendGridAPIClient(os.environ.get("SENDGRID_API_KEY"))
-        response = sg.send(message)
-        print(response.status_code)
-        print(response.body)
-        print(response.headers)
+        msg = resend.Emails.send(
+            {
+                "from": "ionganea@splitbills.org",
+                "to": recipient,
+                "subject": "Someone added you to SplitBill",
+                "html": f"You were added to SplitBill '{splitbill_title}' by {added_by}. If you don't have an account yet, you can view it here: {link}",
+            }
+        )
+        print(msg)
     except Exception as e:
         print(str(e))
 
 
 async def send_activation_email(user_email: str, token: str):
     activation_link = f"{settings.url}/activate?token={token}"
-    message = Mail(
-        from_email=os.environ.get("MAIL_FROM"),
-        to_emails=user_email,
-        subject="Activate Your Account",
-        html_content=f"Welcome! Please activate your account by clicking the link: {activation_link}",
-    )
     try:
-        sg = SendGridAPIClient(os.environ.get("SENDGRID_API_KEY"))
-        response = sg.send(message)
-        print(response.status_code)
-        print(response.body)
-        print(response.headers)
+        msg = resend.Emails.send(
+            {
+                "from": "ionganea@splitbills.org",
+                "to": user_email,
+                "subject": "Activate Your Account",
+                "html": f"Welcome! Please activate your account by clicking the link: {activation_link}",
+            }
+        )
+        print(msg)
     except Exception as e:
         print(str(e))
 
 
 async def send_reset_token(user_email: str, token: str):
     reset_link = f"{settings.url}/reset-password-complete?token={token}"
-    message = Mail(
-        from_email=os.environ.get("MAIL_FROM"),
-        to_emails=user_email,
-        subject="Reset password",
-        html_content=f"You requested to reset password. Do it following this link: {reset_link}",
-    )
     try:
-        sg = SendGridAPIClient(os.environ.get("SENDGRID_API_KEY"))
-        response = sg.send(message)
-        print(response.status_code)
-        print(response.body)
-        print(response.headers)
+        msg = resend.Emails.send(
+            {
+                "from": "ionganea@splitbills.org",
+                "to": user_email,
+                "subject": "Reset password",
+                "html": f"You requested to reset password. Do it following this link: {reset_link}",
+            }
+        )
+        print(msg)
     except Exception as e:
         print(str(e))
