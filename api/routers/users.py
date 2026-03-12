@@ -39,14 +39,12 @@ async def create_user(
     )
     token = secrets.token_urlsafe(32)
     db_user.activation_token = token
-    print(f"127.0.0.1:8000/docs/users/activate/{token}")
     session.add(db_user)
     try:
         await session.flush()
         await session.refresh(db_user)
     except Exception as e:
         await session.rollback()
-        print(e)
         raise HTTPException(status_code=400, detail="Username or email already exists")
 
     pending_members_result = await session.execute(

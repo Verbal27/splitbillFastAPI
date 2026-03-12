@@ -22,7 +22,6 @@ if config.config_file_name is not None:
 
 
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL_asyncpg)  # type: ignore
-print(f"🔍 Alembic using DATABASE_URL: {settings.DATABASE_URL_asyncpg}")
 
 
 # Offline migration

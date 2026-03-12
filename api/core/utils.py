@@ -172,9 +172,8 @@ async def send_add_email(
                 "html": f"You were added to SplitBill '{splitbill_title}' by {added_by}. If you don't have an account yet, you can view it here: {link}",
             }
         )
-        print(msg)
     except Exception as e:
-        print(str(e))
+        return str(e)
 
 
 async def send_activation_email(user_email: str, request: Request, token: str):
@@ -189,9 +188,8 @@ async def send_activation_email(user_email: str, request: Request, token: str):
                 "html": f"Welcome! Please activate your account by clicking the link: {activation_link}",
             }
         )
-        print(msg)
     except Exception as e:
-        print(str(e))
+        return str(e)
 
 
 async def send_reset_token(user_email: str, request: Request, token: str):
@@ -206,6 +204,5 @@ async def send_reset_token(user_email: str, request: Request, token: str):
                 "html": f"You requested to reset password. Do it following this link: {reset_link}",
             }
         )
-        print(msg)
     except Exception as e:
-        print(str(e))
+        return str(e)

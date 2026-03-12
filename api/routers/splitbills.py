@@ -53,7 +53,7 @@ router = APIRouter(prefix="/splitbills", tags=["splitbills"])
 async def list_all(
     session: AsyncSession = Depends(get_session),
     current_user: UsersOrm = Depends(get_current_user),
-):
+) -> List | None:
     stmt = (
         select(SplitBillsOrm)
         .where(
@@ -76,7 +76,18 @@ async def list_all(
             selectinload(SplitBillsOrm.owner),
         )
     )
+    user = await session.execute(select(UsersOrm).where(UsersOrm.id == current_user.id))
+    db_user = user.scalar_one_or_none()
 
+    if not db_user:
+        raise HTTPException(
+            status_code=400, detail="You must login before proceeding to this action"
+        )
+    if db_user.status == "pending":
+        raise HTTPException(
+            status_code=400,
+            detail="You must activate account via email before being able to create a splitbill session",
+        )
     result = await session.execute(stmt)
     splitbills_list = result.scalars().all()
     if not splitbills_list:
@@ -102,6 +113,19 @@ async def create_splitbill(
     )
     session.add(db_splitbill)
     await session.flush()
+
+    user = await session.execute(select(UsersOrm).where(UsersOrm.id == current_user.id))
+    db_user = user.scalar_one_or_none()
+
+    if not db_user:
+        raise HTTPException(
+            status_code=400, detail="You must login before proceeding to this action"
+        )
+    if db_user.status == "pending":
+        raise HTTPException(
+            status_code=400,
+            detail="You must activate account via email before being able to create a splitbill session",
+        )
 
     owner_member = SplitBillMembersOrm(
         alias=current_user.username,
@@ -162,7 +186,6 @@ async def create_splitbill(
             added_by=current_user.username,
             link=link,
         )
-    print(f"Generated guest link: {link}")
     return res
 
 
@@ -182,6 +205,10 @@ async def read_splitbill(
         )
     )
     member = user.scalar_one_or_none()
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if not (member or splitbill.owner_id == current_user.id):
         raise HTTPException(
             status_code=403, detail="Not authorized to view this splitbill"
@@ -195,7 +222,7 @@ async def read_expenses(
     splitbill_id: int,
     session: AsyncSession = Depends(get_session),
     current_user: UsersOrm = Depends(get_current_user),
-):
+) -> List | None:
     user = await session.execute(
         select(SplitBillMembersOrm).where(
             SplitBillMembersOrm.splitbill_id == splitbill_id,
@@ -203,6 +230,10 @@ async def read_expenses(
         )
     )
     member = user.scalar_one_or_none()
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if not member:
         owner = await session.execute(
             select(SplitBillsOrm.owner_id).where(SplitBillsOrm.id == splitbill_id)
@@ -244,6 +275,10 @@ async def create_expense(
             SplitBillMembersOrm.user_id == current_user.id,
         )
     )
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if not member_check.scalar_one_or_none() and splitbill.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to add expenses")
 
@@ -383,7 +418,11 @@ async def update_expense(
         db_exp = result.scalar_one_or_none()
         if not db_exp:
             raise HTTPException(status_code=404, detail="Expense not found")
-
+        if current_user.status == "pending":
+            raise HTTPException(
+                status_code=400,
+                detail="Activate account before proceeding to this action",
+            )
         if current_user.id != db_splitbill.owner_id:
             raise HTTPException(
                 status_code=403, detail="Only owner can modify expenses"
@@ -505,7 +544,10 @@ async def delete_expense(
     db_exp = expense.scalar_one_or_none()
     if not db_exp:
         raise HTTPException(status_code=404, detail="Expense not found")
-
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if db_splitbill.owner_id != current_user.id:
         raise HTTPException(
             status_code=403, detail="Only splitbill owner can delete expenses"
@@ -537,7 +579,10 @@ async def create_money_given(
         select(SplitBillsOrm.owner_id).where(SplitBillsOrm.id == splitbill_id)
     )
     owner_id = owner_check.scalar_one_or_none()
-
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if not (member or current_user.id == owner_id):
         raise HTTPException(
             status_code=403, detail="Not authorized to add transactions"
@@ -586,7 +631,10 @@ async def modify_transaction(
     db_mg = result.scalar_one_or_none()
     if not db_mg:
         raise HTTPException(status_code=404, detail="Transaction not found")
-
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if db_splitbill.owner_id != current_user.id:
         raise HTTPException(
             status_code=403, detail="Only splitbill owner can modify transactions"
@@ -638,7 +686,10 @@ async def delete_transaction(
     db_mg = result.scalar_one_or_none()
     if not db_mg:
         raise HTTPException(status_code=404, detail="Transaction not found")
-
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if db_splitbill.owner_id != current_user.id:
         raise HTTPException(
             status_code=403, detail="Only splitbill owner can delete transactions"
@@ -674,7 +725,10 @@ async def create_comment(
             )
         )
     ).scalar_one_or_none()
-
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if not member and splitbill.owner_id != current_user.id:
         raise HTTPException(
             status_code=403, detail="Not authorized to comment on this splitbill"
@@ -715,7 +769,10 @@ async def add_members(
     ).scalar_one_or_none()  # type: ignore
     if not splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
-
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if db_user.id != splitbill.owner_id:
         raise HTTPException(status_code=403, detail="Only owner can add members")
 
@@ -774,7 +831,6 @@ async def add_members(
                 added_by=current_user.username,
                 link=link,
             )
-            print(link)
         except Exception as e:
             raise HTTPException(status_code=500, detail=e)
 
@@ -802,7 +858,10 @@ async def remove_member(
     splitbill = splitbill_result.scalar_one_or_none()  # type: ignore
     if not splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
-
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if db_user.id != splitbill.owner_id:
         raise HTTPException(status_code=403, detail="Only the owner can remove members")
 
@@ -850,7 +909,10 @@ async def modify_member(
     ).scalar_one_or_none()
     if not splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
-
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if db_user.id != splitbill.owner_id:
         raise HTTPException(status_code=403, detail="Only owner can modify members")
 
@@ -908,7 +970,6 @@ async def modify_member(
                 added_by=current_user.username,
                 link=link,
             )
-            print(link)
         except Exception as e:
             raise HTTPException(status_code=500, detail=e)
 
@@ -929,7 +990,10 @@ async def close_splitbill(
     db_splitbill = result.scalar_one_or_none()
     if not db_splitbill:
         raise HTTPException(status_code=404, detail="Splitbill not found")
-
+    if current_user.status == "pending":
+        raise HTTPException(
+            status_code=400, detail="Activate account before proceeding to this action"
+        )
     if current_user.id != db_splitbill.owner_id:
         raise HTTPException(
             status_code=403, detail="Only owner can mark splitbill as solved"
