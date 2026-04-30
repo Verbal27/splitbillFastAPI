@@ -3,6 +3,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import EmailStr
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import FileResponse, RedirectResponse
 
 from ..core.utils import send_activation_email, send_reset_token
 
@@ -82,7 +83,9 @@ async def create_user(
 
 @router.post("/reset-password")
 async def reset_request(
-    email: EmailStr, request: Request, session: AsyncSession = Depends(get_session)
+    request: Request,
+    email: EmailStr = Body(..., embed=True),
+    session: AsyncSession = Depends(get_session),
 ):
     db_user = await session.execute(select(UsersOrm).where(UsersOrm.email == email))
     user = db_user.scalar_one_or_none()
@@ -101,10 +104,18 @@ async def reset_request(
     return {"status": 200, "detail": "Token generated successfully"}
 
 
-@router.post("/reset-password-complete")
-async def reset_complete(
-    token: str,
-    user_update: UserPasswordUpdateSchema = Body(...),
+@router.get("/reset-password-complete")
+async def show_reset_password_form(token: str):
+    # This endpoint will render an HTML page with a form for password reset
+    # The form will contain a hidden input for the token and fields for new password.
+    # The form will POST to a new endpoint, /users/reset-password-submit.
+    return FileResponse("static/reset_password_form.html", media_type="text/html")
+
+
+@router.post("/reset-password-submit")
+async def reset_password_submit(
+    token: str = Body(..., embed=True),  # Token from hidden form field
+    password: str = Body(..., embed=True),  # New password from form field
     session: AsyncSession = Depends(get_session),
 ):
     user_token = await session.execute(
@@ -115,8 +126,7 @@ async def reset_complete(
     if not request:
         raise HTTPException(status_code=404, detail="No request found for this token")
 
-    update_data = user_update.model_dump(exclude_unset=True)
-    update_data["hashed_password"] = hash_password(update_data.pop("password"))
+    update_data = {"hashed_password": hash_password(password)}
 
     await session.execute(
         update(UsersOrm).where(UsersOrm.id == request.user_id).values(**update_data)
@@ -167,7 +177,6 @@ async def update_user(
 @router.get("/activate")
 async def activate_user(
     token: str,
-    current_user: UsersOrm = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(
@@ -175,13 +184,15 @@ async def activate_user(
     )
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=400, detail="Invalid token")
+        return RedirectResponse(
+            url="/?error=Invalid+or+expired+activation+token", status_code=302
+        )
 
     user.status = UserStatusEnum.active
     user.activation_token = None
     session.add(user)
     await session.commit()
-    return {"message": "User activated successfully"}
+    return RedirectResponse(url="/?activated=true", status_code=302)
 
 
 @router.delete("/delete")

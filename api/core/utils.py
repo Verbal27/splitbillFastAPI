@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from fastapi import Depends, HTTPException, Request
 from decimal import Decimal
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from dotenv import load_dotenv
@@ -112,19 +112,15 @@ async def calculate_balances(splitbill_id: int, session: AsyncSession):
             else:
                 cleaned_balances.setdefault(debtor, {})[creditor] = amount
 
-    active_balances = {
-        b.id: b for b in splitbill.balances if b.status == StatusEnum.active
-    }
-
-    for bal_id, bal in active_balances.items():
+    for bal in splitbill.balances:
         debtor = bal.from_member_id
         creditor = bal.to_member_id
         if debtor in cleaned_balances and creditor in cleaned_balances[debtor]:
             bal.amount = cleaned_balances[debtor][creditor].quantize(Decimal("0.01"))
+            bal.status = StatusEnum.active
             del cleaned_balances[debtor][creditor]
         else:
-            bal.status = StatusEnum.settled
-            bal.amount = bal.amount.quantize(Decimal("0.01"))
+            await session.delete(bal)
 
     for debtor, creditors in cleaned_balances.items():
         for creditor, amount in creditors.items():
@@ -160,6 +156,14 @@ async def generate_guest_link(
     return link
 
 
+async def cleanup_expired_guest_tokens(session: AsyncSession) -> int:
+    """Deletes guest link tokens that have passed their expiration date."""
+    stmt = delete(GuestsOrm).where(GuestsOrm.expires < datetime.now(tz=timezone.utc))
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount
+
+
 async def send_add_email(
     recipient: str, splitbill_title: str, added_by: str, link: str
 ):
@@ -178,7 +182,7 @@ async def send_add_email(
 
 async def send_activation_email(user_email: str, request: Request, token: str):
     base_url = str(request.base_url)
-    activation_link = f"{base_url}activate?token={token}"
+    activation_link = f"{base_url}users/activate?token={token}"
     try:
         msg = resend.Emails.send(
             {
@@ -194,7 +198,7 @@ async def send_activation_email(user_email: str, request: Request, token: str):
 
 async def send_reset_token(user_email: str, request: Request, token: str):
     base_url = str(request.base_url)
-    reset_link = f"{base_url}reset-password-complete?token={token}"
+    reset_link = f"{base_url}users/reset-password-complete?token={token}"
     try:
         msg = resend.Emails.send(
             {

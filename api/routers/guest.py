@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -11,7 +13,12 @@ router = APIRouter()
 
 
 @router.get("/guest-access/{token}")
-async def view_as_guest(token: str, session: AsyncSession = Depends(get_session)):
+async def view_as_guest(
+    token: str, request: Request, session: AsyncSession = Depends(get_session)
+):
+    if request.query_params.get("api") != "true":
+        return FileResponse("static/guest_view.html", media_type="text/html")
+
     guest_result = await session.execute(
         select(GuestsOrm).where(GuestsOrm.token == token)
     )
@@ -44,24 +51,44 @@ async def view_as_guest(token: str, session: AsyncSession = Depends(get_session)
 
     response = {
         "title": db_splitbill.title,
+        "currency": db_splitbill.currency,
         "date_created": db_splitbill.date_created.isoformat(),
         "owner": db_splitbill.owner.username if db_splitbill.owner else None,
-        "members": [{"alias": m.alias, "email": m.email} for m in db_splitbill.members],
+        "members": [
+            {
+                "id": m.id,
+                "alias": m.alias,
+                "email": m.email if m.email else None,
+            }
+            for m in db_splitbill.members
+        ],
         "expenses": [
-            {"title": e.title, "amount": e.amount, "type": e.type}
+            {
+                "title": e.title,
+                "amount": e.amount,
+                "type": e.type,
+                "date_created": e.date_created.isoformat(),
+                "paid_by_id": e.paid_by_id,
+            }
             for e in db_splitbill.expenses
         ],
-        "transaction": [
+        "money_given": [
             {
                 "title": t.title,
                 "amount": t.amount,
                 "given_by": t.given_by,
                 "given_to": t.given_to,
+                "date_created": t.date_created.isoformat(),
             }
             for t in db_splitbill.money_given
         ],
         "comments": [
-            {"text": c.text, "author_id": c.author_id} for c in db_splitbill.comments
+            {
+                "text": c.text,
+                "author_id": c.author_id,
+                "date_created": c.date_created.isoformat(),
+            }
+            for c in db_splitbill.comments
         ],
         "balances": [
             {
@@ -76,4 +103,4 @@ async def view_as_guest(token: str, session: AsyncSession = Depends(get_session)
         "status": db_splitbill.status,
     }
 
-    return response
+    return JSONResponse(content=jsonable_encoder(response))

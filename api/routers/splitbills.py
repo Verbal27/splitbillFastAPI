@@ -927,7 +927,12 @@ async def modify_member(
     if member_data.alias is not None:
         member.alias = member_data.alias
 
-    if member_data.email is not None and member_data.email != member.email:
+    email_changed = False
+    if member_data.email is not None:
+        incoming_email = str(member_data.email).strip()
+        current_email = str(member.email).strip() if member.email else None
+        if incoming_email != current_email:
+            email_changed = True
         existing_member = (
             await session.execute(
                 select(SplitBillMembersOrm)
@@ -961,7 +966,7 @@ async def modify_member(
     await session.commit()
     await session.refresh(member)
 
-    if member.email:
+    if email_changed and member.email:
         try:
             link = await generate_guest_link(splitbill.id, request, session)
             await send_add_email(
@@ -1013,3 +1018,47 @@ async def close_splitbill(
     await session.refresh(db_splitbill)
 
     return {"message": "Splitbill closed successfully"}
+
+
+@router.delete("/{splitbill_id}")
+async def delete_splitbill(
+    splitbill_id: int,
+    current_user: UsersOrm = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+    )
+    db_splitbill = result.scalar_one_or_none()
+    if not db_splitbill:
+        raise HTTPException(status_code=404, detail="Splitbill not found")
+    if current_user.id != db_splitbill.owner_id:
+        raise HTTPException(
+            status_code=403, detail="Only owner can delete the splitbill"
+        )
+
+    await session.delete(db_splitbill)
+    await session.commit()
+    return {"status": 200, "detail": "Splitbill deleted successfully"}
+
+
+@router.get("/{splitbill_id}/guest-link")
+async def get_guest_link(
+    splitbill_id: int,
+    request: Request,
+    current_user: UsersOrm = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(SplitBillsOrm).where(SplitBillsOrm.id == splitbill_id)
+    )
+    db_splitbill = result.scalar_one_or_none()
+    if not db_splitbill:
+        raise HTTPException(status_code=404, detail="Splitbill not found")
+    if current_user.id != db_splitbill.owner_id:
+        raise HTTPException(
+            status_code=403, detail="Only owner can generate guest links"
+        )
+
+    link = await generate_guest_link(splitbill_id, request, session)
+    return {"link": link}
