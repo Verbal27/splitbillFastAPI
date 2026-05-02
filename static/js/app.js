@@ -1,6 +1,6 @@
 /* SplitBill main frontend application logic */
 // The Base URL config points to your FastAPI backend
-const API_URL = ''; 
+const API_URL = '/api'; 
 let token = localStorage.getItem('token');
 let isLoginMode = true;
 let activeUser = null;

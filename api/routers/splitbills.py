@@ -46,7 +46,7 @@ from ..schemas.splitbill_schema import (
 )
 
 
-router = APIRouter(prefix="/splitbills", tags=["splitbills"])
+router = APIRouter(prefix="/api/splitbills", tags=["splitbills"])
 
 
 @router.get("/", response_model=list[SplitBillReadSchema])

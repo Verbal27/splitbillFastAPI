@@ -25,7 +25,7 @@ from ..schemas.users_schema import (
 )
 
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/api/users", tags=["users"])
 
 
 @router.post("/register", response_model=UserReadSchema)

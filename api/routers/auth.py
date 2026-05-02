@@ -7,7 +7,7 @@ from api.models.models import UsersOrm
 from api.schemas.users_schema import Token
 from api.core.auth import verify_password, create_access_token
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 from fastapi.security import OAuth2PasswordRequestForm

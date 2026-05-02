@@ -12,7 +12,7 @@ from api.models.models import GuestsOrm, SplitBillsOrm
 router = APIRouter()
 
 
-@router.get("/guest-access/{token}")
+@router.get("/api/guest-access/{token}")
 async def view_as_guest(
     token: str, request: Request, session: AsyncSession = Depends(get_session)
 ):

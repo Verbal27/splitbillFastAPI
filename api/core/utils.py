@@ -151,7 +151,7 @@ async def generate_guest_link(
     session.add(guest)
     await session.commit()
     base_url = str(request.base_url)
-    link = f"{base_url}guest-access/{token}"
+    link = f"{base_url}api/guest-access/{token}"
 
     return link
 
@@ -182,7 +182,7 @@ async def send_add_email(
 
 async def send_activation_email(user_email: str, request: Request, token: str):
     base_url = str(request.base_url)
-    activation_link = f"{base_url}users/activate?token={token}"
+    activation_link = f"{base_url}api/users/activate?token={token}"
     try:
         msg = resend.Emails.send(
             {
@@ -198,7 +198,7 @@ async def send_activation_email(user_email: str, request: Request, token: str):
 
 async def send_reset_token(user_email: str, request: Request, token: str):
     base_url = str(request.base_url)
-    reset_link = f"{base_url}users/reset-password-complete?token={token}"
+    reset_link = f"{base_url}api/users/reset-password-complete?token={token}"
     try:
         msg = resend.Emails.send(
             {

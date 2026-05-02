@@ -25,7 +25,7 @@ async function initGuestView() {
 
     try {
         // Tell the FastAPI backend that we explicitly want JSON data
-        const res = await fetch(`/guest-access/${token}?api=true`, {
+        const res = await fetch(`/api/guest-access/${token}?api=true`, {
             headers: { 'Accept': 'application/json' }
         });
         
