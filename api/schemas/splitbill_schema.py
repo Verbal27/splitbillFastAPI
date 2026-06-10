@@ -4,6 +4,7 @@ from pydantic import (
     BaseModel,
     EmailStr,
     StringConstraints,
+    model_validator,
 )
 from typing_extensions import Annotated
 from decimal import Decimal
@@ -36,6 +37,17 @@ class ExpenseCreateSchema(BaseModel):
     type: ExpenseTypeEnum
     paid_by_id: int
     assignments: Optional[list[ExpenseAssignmentCreateSchema]] = None
+
+    @model_validator(mode="after")
+    def validate_expense(self) -> "ExpenseCreateSchema":
+        if self.amount <= 0:
+            raise ValueError("Amount must be greater than zero.")
+        if self.type != ExpenseTypeEnum.equal:
+            if not self.assignments:
+                raise ValueError(
+                    f"Assignments are required when split type is {self.type.value}"
+                )
+        return self
 
 
 class ExpenseReadSchema(BaseModel):
@@ -70,6 +82,14 @@ class MoneyGivenBaseSchema(BaseModel):
 class MoneyGivenCreateSchema(MoneyGivenBaseSchema):
     given_by: int
     given_to: int
+
+    @model_validator(mode="after")
+    def check_validity(self) -> "MoneyGivenCreateSchema":
+        if self.amount <= 0:
+            raise ValueError("Amount must be greater than zero.")
+        if self.given_by == self.given_to:
+            raise ValueError("Sender and receiver cannot be the same person.")
+        return self
 
 
 class MoneyGivenReadSchema(MoneyGivenBaseSchema):
@@ -141,13 +161,11 @@ class SplitBillMemberBaseSchema(BaseModel):
     email: Optional[EmailStr] = None
     alias: Optional[str] = None
 
-    # @field_validator("email", mode="before")
-    # @classmethod
-    # def require_email_or_alias(cls, v, info):
-    #     alias = info.data.get("alias")
-    #     if not v and not alias:
-    #         raise ValueError("At least one of 'email' or 'alias' must be provided")
-    #     return v
+    @model_validator(mode="after")
+    def require_email_or_alias(self) -> "SplitBillMemberBaseSchema":
+        if not self.email and not self.alias:
+            raise ValueError("At least one of 'email' or 'alias' must be provided")
+        return self
 
 
 class SplitBillMemberCreateSchema(SplitBillMemberBaseSchema):

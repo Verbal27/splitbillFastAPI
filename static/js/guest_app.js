@@ -5,6 +5,36 @@ const ui = {
     alertMessage: document.getElementById('alert-message')
 };
 
+function formatValidationError(detail) {
+    if (!Array.isArray(detail)) return detail;
+    return detail.map(e => {
+        let field = e.loc && e.loc.length > 0 ? e.loc[e.loc.length - 1] : 'Error';
+        if (field === '__root__') field = 'Error';
+        else {
+            field = String(field).replace(/_id$/, '').replace(/_/g, ' ');
+            if (field.toLowerCase() === 'username') field = 'Email / Username';
+            else field = field.charAt(0).toUpperCase() + field.slice(1);
+        }
+
+        let msg = String(e.msg || '');
+        if (msg.includes('String should have at least')) {
+            const match = msg.match(/at least (\d+) characters/);
+            const count = match ? match[1] : 'some';
+            msg = `Must be at least ${count} characters long.`;
+        } else if (msg.includes('value is not a valid email')) {
+            msg = `Must be a valid email address.`;
+        } else if (msg.toLowerCase().includes('field required')) {
+            msg = `This field is required.`;
+        } else if (msg.includes('Value error,')) {
+            msg = msg.replace('Value error, ', '').trim();
+        } else if (msg.includes('Input should be')) {
+            msg = msg.replace('Input should be', 'Must be');
+        }
+
+        return field === 'Error' ? msg : `${field}: ${msg}`;
+    }).join('\n');
+}
+
 function showError(msg) {
     ui.alertMessage.innerText = msg;
     ui.alertBox.classList.remove('hidden');
@@ -35,7 +65,7 @@ async function initGuestView() {
             
             
             if (Array.isArray(err.detail)) {
-                errorMsg = err.detail.map(e => `${e.loc.join(' -> ')}: ${e.msg}`).join('\n');
+                errorMsg = formatValidationError(err.detail);
             }
             
             throw new Error(errorMsg);
@@ -90,7 +120,13 @@ function renderBill(bill) {
     ].sort((a, b) => b._date - a._date);
 
     if(allActivity.length === 0) {
-        expList.innerHTML = '<li class="p-4 text-center text-slate-400 text-sm">No expenses or payments yet.</li>';
+        expList.innerHTML = `
+            <li class="p-8 flex flex-col items-center justify-center text-center bg-slate-50 rounded-lg border border-slate-100 border-dashed">
+                <div class="text-slate-400 mb-2">
+                    <svg class="w-10 h-10 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                </div>
+                <p class="text-sm font-medium text-slate-500">No expenses or payments yet.</p>
+            </li>`;
     } else {
         expList.innerHTML = allActivity.map(item => {
             if (item._isPayment) {

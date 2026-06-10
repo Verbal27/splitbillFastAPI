@@ -53,6 +53,38 @@ function showError(msg) {
     showToast(msg, 'error');
 }
 
+// Helper to make API validation errors much more human-readable
+function formatValidationError(detail) {
+    if (!Array.isArray(detail)) return detail;
+    return detail.map(e => {
+        let field = e.loc && e.loc.length > 0 ? e.loc[e.loc.length - 1] : 'Error';
+        if (field === '__root__') field = 'Error';
+        else {
+            field = String(field).replace(/_id$/, '').replace(/_/g, ' ');
+            if (field.toLowerCase() === 'username') field = 'Email / Username';
+            else field = field.charAt(0).toUpperCase() + field.slice(1);
+        }
+        
+        let msg = String(e.msg || '');
+        // Translate common verbose Pydantic errors
+        if (msg.includes('String should have at least')) {
+            const match = msg.match(/at least (\d+) characters/);
+            const count = match ? match[1] : 'some';
+            msg = `Must be at least ${count} characters long.`;
+        } else if (msg.includes('value is not a valid email')) {
+            msg = `Must be a valid email address.`;
+        } else if (msg.toLowerCase().includes('field required')) {
+            msg = `This field is required.`;
+        } else if (msg.includes('Value error,')) {
+            msg = msg.replace('Value error, ', '').trim();
+        } else if (msg.includes('Input should be')) {
+            msg = msg.replace('Input should be', 'Must be');
+        }
+        
+        return field === 'Error' ? msg : `${field}: ${msg}`;
+    }).join('\n');
+}
+
 // Centralized fetch wrapper to handle auth and common errors
 async function fetchAPI(endpoint, options = {}) {
     const headers = { ...options.headers };
@@ -69,7 +101,7 @@ async function fetchAPI(endpoint, options = {}) {
         const errData = await res.json().catch(() => ({}));
         let errorMsg = errData.detail || `Request failed with status ${res.status}`;
         if (Array.isArray(errData.detail)) {
-            errorMsg = errData.detail.map(e => `${e.loc.join(' -> ')}: ${e.msg}`).join('\n');
+            errorMsg = formatValidationError(errData.detail);
         }
         throw new Error(errorMsg);
     }
@@ -142,7 +174,7 @@ async function handleAuth(e) {
                 const d = await res.json().catch(()=>({}));
                 let errorMsg = d.detail || 'Login failed. Please check your credentials.';
                 if (Array.isArray(d.detail)) {
-                    errorMsg = d.detail.map(e => `${e.loc.join(' -> ')}: ${e.msg}`).join('\n');
+                errorMsg = formatValidationError(d.detail);
                 }
                 throw new Error(errorMsg);
             }
@@ -160,7 +192,7 @@ async function handleAuth(e) {
                 const d = await res.json().catch(()=>({}));
                 let errorMsg = d.detail || 'Registration failed';
                 if (Array.isArray(d.detail)) {
-                    errorMsg = d.detail.map(e => `${e.loc.join(' -> ')}: ${e.msg}`).join('\n');
+                errorMsg = formatValidationError(d.detail);
                 }
                 throw new Error(errorMsg);
             }
@@ -205,6 +237,20 @@ function showDashboard(user) {
     ui.navUsername.innerText = `@${user.username}`;
     ui.billDetails.style.display = 'none';
     ui.billEmpty.style.display = 'flex';
+    
+    // Add a welcoming onboarding UI for new users
+    ui.billEmpty.innerHTML = `
+        <div class="text-center p-8 max-w-md mx-auto w-full">
+            <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+            </div>
+            <h2 class="text-2xl font-bold text-slate-800 mb-3">Welcome to SplitBill!</h2>
+            <p class="text-slate-500 mb-8 leading-relaxed">Select a bill from the sidebar to view its details, or create a new one to start tracking shared expenses with your friends easily.</p>
+            <button onclick="showCreateModal()" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition shadow-md hover:shadow-lg transform hover:-translate-y-0.5 w-full sm:w-auto">
+                Create a New Bill
+            </button>
+        </div>
+    `;
     loadBills();
 }
 
@@ -212,11 +258,21 @@ async function loadBills() {
     ui.billsList.innerHTML = '<li class="text-center p-4"><span class="loader border-blue-500"></span></li>';
     try {
         const res = await fetchAPI('/splitbills/');
-        if (res.status === 404) {
-            ui.billsList.innerHTML = '<li class="p-4 text-slate-500 text-sm text-center border-2 border-dashed border-slate-200 rounded-lg">No splitbills found. Create one to get started!</li>';
+        let bills = [];
+        if (res.status !== 404) {
+            bills = await res.json();
+        }
+        
+        if (res.status === 404 || bills.length === 0) {
+            ui.billsList.innerHTML = `
+                <li class="p-5 flex flex-col items-center justify-center text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 mt-2">
+                    <p class="text-slate-500 mb-4 text-sm font-medium">No splitbills found.</p>
+                    <button onclick="showCreateModal()" class="bg-white text-blue-600 border border-blue-200 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-50 transition shadow-sm">
+                        Create First Bill
+                    </button>
+                </li>`;
             return;
         }
-        const bills = await res.json();
         
         ui.billsList.innerHTML = '';
         bills.forEach(bill => {
@@ -317,7 +373,14 @@ async function loadBillDetails(id) {
         ].sort((a, b) => b._date - a._date);
 
         if(allActivity.length === 0) {
-            expList.innerHTML = '<li class="p-4 text-center text-slate-400 text-sm">No expenses or payments yet.</li>';
+            expList.innerHTML = `
+                <li class="p-8 flex flex-col items-center justify-center text-center bg-slate-50 rounded-lg border border-slate-100 border-dashed">
+                    <div class="text-slate-400 mb-2">
+                        <svg class="w-10 h-10 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <p class="text-sm font-medium text-slate-500">No expenses or payments yet.</p>
+                    <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">Add an expense to start tracking what is owed.</p>
+                </li>`;
         } else {
             expList.innerHTML = allActivity.map(item => {
                 const delBtn = isOwner ? `<button onclick="${item._isPayment ? `handleDeletePayment(${item.id})` : `handleDeleteExpense(${item.id})`}" class="text-slate-400 hover:text-red-500 ml-4 flex-shrink-0" title="Delete"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>` : '';
