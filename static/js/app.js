@@ -67,7 +67,11 @@ async function fetchAPI(endpoint, options = {}) {
     }
     if (!res.ok && res.status !== 404) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || `Request failed with status ${res.status}`);
+        let errorMsg = errData.detail || `Request failed with status ${res.status}`;
+        if (Array.isArray(errData.detail)) {
+            errorMsg = errData.detail.map(e => `${e.loc.join(' -> ')}: ${e.msg}`).join('\n');
+        }
+        throw new Error(errorMsg);
     }
     return res;
 }
@@ -136,7 +140,11 @@ async function handleAuth(e) {
             });
             if (!res.ok) {
                 const d = await res.json().catch(()=>({}));
-                throw new Error(d.detail || 'Login failed. Please check your credentials.');
+                let errorMsg = d.detail || 'Login failed. Please check your credentials.';
+                if (Array.isArray(d.detail)) {
+                    errorMsg = d.detail.map(e => `${e.loc.join(' -> ')}: ${e.msg}`).join('\n');
+                }
+                throw new Error(errorMsg);
             }
             const data = await res.json();
             token = data.access_token;
@@ -150,7 +158,11 @@ async function handleAuth(e) {
             });
             if (!res.ok) {
                 const d = await res.json().catch(()=>({}));
-                throw new Error(d.detail || 'Registration failed');
+                let errorMsg = d.detail || 'Registration failed';
+                if (Array.isArray(d.detail)) {
+                    errorMsg = d.detail.map(e => `${e.loc.join(' -> ')}: ${e.msg}`).join('\n');
+                }
+                throw new Error(errorMsg);
             }
             showToast('Registration successful! Check your email for an activation link.', 'success');
             toggleAuthMode();
